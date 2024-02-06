@@ -1,4 +1,5 @@
 import sys
+import wandb
 import os
 curPath = os.path.abspath(os.path.dirname(__file__))
 rootPath = os.path.split(curPath)[0]
@@ -11,6 +12,7 @@ from notebooks.SAM_conf import SAM_cfg
 from torch.utils.data import DataLoader
 from notebooks.SAM_conf.SAM_utils import *
 import function
+from glob import glob 
 
 args = SAM_cfg.parse_args()
 
@@ -46,40 +48,38 @@ args.path_helper = set_log_dir('../logs', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
-'''segmentation data'''
-transform_train = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
-
-transform_train_seg = transforms.Compose([
-    transforms.Resize((args.out_size, args.out_size)),
-    transforms.ToTensor(),
-])
-
-transform_test = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
-
-transform_test_seg = transforms.Compose([
-    transforms.Resize((args.out_size, args.out_size)),
-    transforms.ToTensor(),
-])
-
 if args.dataset == 'CryoPPP':
     '''Cryoppp data'''
-    train_dataset = CryopppDataset(args, args.data_path, transform=transform_train,
-                                   transform_msk=transform_train_seg, mode='train', prompt=args.prompt_approach)
-    valid_dataset = CryopppDataset(args, args.data_path, transform=transform_test,
-                                   transform_msk=transform_test_seg, mode='valid', prompt=args.prompt_approach)
 
-    nice_train_loader = DataLoader(train_dataset, batch_size=args.b, shuffle=True, num_workers=8, pin_memory=True)
-    nice_valid_loader = DataLoader(valid_dataset, batch_size=args.b, shuffle=False, num_workers=8, pin_memory=True)
+    wandb.init(project="sam_adapter_finetune")
+
+    df=pd.read_csv("/home/geovisionaries/sambal/sam_boundary_adapter/ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
+    df_region=df[df['file_id'].str.contains("AT")]
+    df_region_train=df_region[df_region['split']=='train']
+    df_region_val=df_region[df_region['split']=='val']
+    
+    
+    train_image = df_region_train['file_id'].tolist()
+    train_label = df_region_train['file_id'].tolist()
+    train_data = TrainDataset(train_image, train_label,is_robustness=False)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
+
+    val_image = df_region_val['file_id'].tolist()
+    val_label = df_region_val['file_id'].tolist()
+    val_data = TestDataset(val_image, val_label,is_robustness=False)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=True)
     '''end'''
 
-elif args.dataset == 'decathlon':
-    nice_train_loader, nice_valid_loader, transform_train, transform_val, train_list, val_list = get_decath_loader(args)
+if args.dataset=='ai4small':
+
+    train_image_list=glob("/home/geovisionaries/sambal/sam_boundary_adapter/original/sentinel-2-asia/train/images/*")
+    val_image_list=glob("/home/geovisionaries/sambal/sam_boundary_adapter/original/sentinel-2-asia/validate/images/*")
+
+    train_data=Ai4smallDataset(train_image_list)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
+
+    val_data=Ai4smallDataset(val_image_list)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=True)
 
 '''checkpoint path and tensorboard'''
 
@@ -104,14 +104,14 @@ for epoch in range(settings.EPOCH):
     if args.mod == 'sam_fine':
         net.train()
         time_start = time.time()
-        loss = function.train_sam(args, net, optimizer, nice_train_loader, epoch, writer, vis=args.vis)
+        loss = function.train_sam(args, net, optimizer, train_dataloader, epoch, writer, vis=args.vis)
         logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
         time_end = time.time()
         print('time_for_training ', time_end - time_start)
 
         net.eval()
-        if epoch and epoch % args.val_freq == 0 or epoch == settings.EPOCH - 1:
-            tol, (eiou, edice) = function.validation_sam(args, nice_valid_loader, epoch, net, writer)
+        if True:
+            tol, (eiou, edice) = function.validation_sam(args,val_dataloader, epoch, net, writer)
             logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {epoch}.')
 
             if args.distributed != 'none':

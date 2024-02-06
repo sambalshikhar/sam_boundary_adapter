@@ -100,13 +100,13 @@ def get_network(args, net, use_gpu=True, gpu_device = 0, distribution = True):
 
     if net == 'sam':
         from segment_anything.build_sam import sam_model_registry
-        net = sam_model_registry['vit_h'](checkpoint=args.sam_ckpt).to(device)
+        net = sam_model_registry['vit_l'](checkpoint=args.sam_ckpt).to(device)
     elif net == 'sam_adapter':
         from segment_anything.build_sam_adapter import sam_model_registry
-        net = sam_model_registry['vit_h'](args,checkpoint=args.sam_ckpt).to(device)
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
     elif net == 'sam_fineTuning':
         from segment_anything.build_sam_adapter import sam_model_registry
-        net = sam_model_registry['vit_h'](args,checkpoint=args.sam_ckpt).to(device)
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
     elif net == 'PromptVit':
         if args.sam_vit_model == "h":
             if args.token_method == "new":
@@ -228,14 +228,12 @@ def get_decath_loader(args):
 
     return train_loader, val_loader, train_transforms, val_transforms, datalist, val_files
 
-
 def cka_loss(gram_featureA, gram_featureB):
 
     scaled_hsic = torch.dot(torch.flatten(gram_featureA),torch.flatten(gram_featureB))
     normalization_x = gram_featureA.norm()
     normalization_y = gram_featureB.norm()
     return scaled_hsic / (normalization_x * normalization_y)
-
 
 class WarmUpLR(_LRScheduler):
     """warmup_training learning rate scheduler
@@ -266,8 +264,6 @@ def gram_matrix(input):
     # we 'normalize' the values of the gram matrix
     # by dividing by the number of element in each feature maps.
     return G.div(a * b * c * d)
-
-
 
 @torch.no_grad()
 def make_grid(

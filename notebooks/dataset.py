@@ -1,6 +1,6 @@
 import csv
 import os
-import cv2
+#import cv2
 from copy import deepcopy
 from typing import List, Tuple
 import numpy as np
@@ -12,300 +12,318 @@ import torchvision.transforms as transforms
 import pandas as pd
 from skimage.transform import rotate
 import random
-
+import rasterio
 class TrainDataset():
-    def __init__(self, image_path, label_path, is_robustness):
+    def __init__(self, image_id, label_id, is_robustness,dict_format=True):
 
-        self.image_path = image_path
-        self.label_path = label_path
+        self.image_id = image_id
+        self.label_id = label_id
         self.is_robustness = is_robustness
+        self.dict_format=dict_format
 
-        self.image_list = sorted(os.listdir(self.image_path))
-        self.label_list = sorted(os.listdir(self.label_path))
+        self.image_list = [f"./ai4boundaries_data/orthophoto/images/train/{x}_ortho_1m_512.tif" for x in self.image_id]
+        self.label_list = [f"./ai4boundaries_data/orthophoto/masks/train/{x}_ortholabel_1m_512.tif" for x in self.image_id]
 
         if self.is_robustness:
             self.image_list, self.label_list = self.get_images_and_labels_path_for_loop()
 
     def __getitem__(self, item):
 
-        image_name = self.image_list[item]
-        image = Image.open(os.path.join(self.image_path, image_name)).convert('RGB')
-        image = image.resize((1024, 1024), Image.ANTIALIAS)
-        image = transforms.ToTensor()(image)
+        image_path = self.image_list[item]
+        #image_path = os.path.join(self.image_path, image_name)
+        input_image = self.__open_tiff__(image_path)
+        input_image = self.min_max_normalize(input_image)
+        input_image = self.resize_array(input_image,(1024,1024))
+        #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
+        input_image = torch.tensor(input_image).float()
 
-        label_name = self.label_list[item]
-        label = Image.open(os.path.join(self.label_path, label_name)).convert('L')
-        label = label.resize((256, 256), Image.ANTIALIAS)
+        label_path = self.label_list[item]
+        #label_path = os.path.join(self.label_path, label_name)
+        input_label = self.__open_tiff__(label_path)
+        input_label = self.resize_array(input_label,(256,256))
+        
+        #label = label.resize((256, 256), Image.ANTIALIAS)
 
-        label = transforms.ToTensor()(label).long()
+        input_label = torch.tensor(input_label).long()
 
-        points_scale = np.array(image.shape[1:])[None, ::-1]
+        points_scale = np.array(input_image.shape[1:])[None, ::-1]
         point_grids = build_all_layer_point_grids(
             n_per_side=32,
             n_layers=0,
             scale_per_layer=1,
         )
         points_for_image = point_grids[0] * points_scale
-        in_points = torch.as_tensor(points_for_image, device='cuda')
-        in_labels = torch.ones(in_points.shape[0], dtype=torch.int, device='cuda')
+        in_points = torch.as_tensor(points_for_image)
+        in_labels = torch.ones(in_points.shape[0], dtype=torch.int)
         points = (in_points, in_labels)
 
-        return image, label, points
+        if self.dict_format:
+            inout = 1
+            point_label = 1
+            boxes = []
+            box_old = []
+            pt = np.array([0, 0])
+            bboxes = []
+
+            pt = points_for_image
+            point_label = np.array(in_labels)
+
+            name = image_path.split('/')[-1].split(".tif")[0]
+            image_meta_dict = {'filename_or_obj': name}
+            return {
+                'image': input_image,
+                'label': input_label,
+                'p_label': point_label,
+                'pt': pt,
+                'box': boxes,
+                # 'box_old':box_old,
+                'image_meta_dict': image_meta_dict,
+                'ground_truth_bboxes': bboxes
+            }
+
+        return input_image, input_label, points
 
     def __len__(self):
 
         return len(self.image_list)
+    
+    def min_max_normalize(self,image):
+        # Assuming image shape is n_channels x height x width
+        channel_mins=np.min(image,axis=(1,2,),keepdims=True)
+        channel_maxs=np.max(image,axis=(1,2),keepdims=True) 
+        normalized_array = (image-channel_mins)/(channel_maxs-channel_mins)
+        return normalized_array
 
-    def get_images_and_labels_path_for_loop(self):
+    def __open_tiff__(self,image_path):
+        image=rasterio.open(image_path).read()
+        return image
+        
+    def resize_array(self,array, new_size):
+        # Transpose the array to height x width x channels
+        array = np.transpose(array, (1, 2, 0))
 
-        self.label_list_robust = sorted([img for img in random.sample(self.label_list, 5)])
-        self.image_list_robust = sorted([self.image_list[self.label_list.index(image)] for image in self.label_list_robust])
-        print(f'train list:{self.label_list_robust}')
+        array = array * 255
+        # Convert to PIL Image
+        pil_image = Image.fromarray(array.astype(np.uint8))
 
-        return self.image_list_robust, self.label_list_robust
+        # Resize the image
+        resized_image = pil_image.resize(new_size)
 
+        # Convert back to numpy array
+        resized_array = np.array(resized_image)
 
+        # Transpose back to channels x height x width
+        resized_array = np.transpose(resized_array, (2, 0, 1))
+        
+        resized_array = resized_array/255
+
+        return resized_array
 
 class TestDataset():
-    def __init__(self, image_path, label_path, is_robustness):
-        self.image_path = image_path
-        self.label_path = label_path
+    def __init__(self, image_id, label_id, is_robustness,dict_format=True):
+
+        self.image_id = image_id
+        self.label_id = label_id
         self.is_robustness = is_robustness
+        self.dict_format=dict_format
 
-        self.image_list = sorted(os.listdir(self.image_path))
-        self.label_list = sorted(os.listdir(self.label_path))
+        self.image_list = [f"./ai4boundaries_data/orthophoto/images/val/{x}_ortho_1m_512.tif" for x in self.image_id]
+        self.label_list = [f"./ai4boundaries_data/orthophoto/masks/val/{x}_ortholabel_1m_512.tif" for x in self.image_id]
 
-        if self.is_robustness:
-            self.image_list, self.label_list = self.get_images_and_labels_path_for_loop()
 
     def __getitem__(self, item):
-        image_name = self.image_list[item]
-        image = Image.open(os.path.join(self.image_path, image_name)).convert('RGB')
-        image = image.resize((1024, 1024), Image.ANTIALIAS)
-        image = transforms.ToTensor()(image)
 
-        label_name = self.label_list[item]
-        label = Image.open(os.path.join(self.label_path, label_name)).convert('L')
-        label = label.resize((256, 256), Image.ANTIALIAS)
+        image_path = self.image_list[item]
+        #image_path = os.path.join(self.image_path, image_name)
+        input_image = self.__open_tiff__(image_path)
+        input_image = self.min_max_normalize(input_image)
+        input_image = self.resize_array(input_image,(1024,1024))
+        #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
+        input_image = torch.tensor(input_image).float()
 
-        label = transforms.ToTensor()(label).long()
+        label_path = self.label_list[item]
+        #label_path = os.path.join(self.label_path, label_name)
+        input_label = self.__open_tiff__(label_path)
+        input_label = self.resize_array(input_label,(256,256))
+        
+        #label = label.resize((256, 256), Image.ANTIALIAS)
 
-        points_scale = np.array(image.shape[1:])[None, ::-1]
+        input_label = torch.tensor(input_label).long()
+
+        points_scale = np.array(input_image.shape[1:])[None, ::-1]
         point_grids = build_all_layer_point_grids(
             n_per_side=32,
             n_layers=0,
             scale_per_layer=1,
         )
         points_for_image = point_grids[0] * points_scale
-        in_points = torch.as_tensor(points_for_image, device='cuda')
-        in_labels = torch.ones(in_points.shape[0], dtype=torch.int, device='cuda')
+        in_points = torch.as_tensor(points_for_image)
+        in_labels = torch.ones(in_points.shape[0], dtype=torch.int)
         points = (in_points, in_labels)
 
-        return image, label, points
+        if self.dict_format:
+            inout = 1
+            point_label = 1
+            boxes = []
+            box_old = []
+            pt = np.array([0, 0])
+            bboxes = []
+
+            pt = points_for_image
+            point_label = np.array(in_labels)
+
+            name = image_path.split('/')[-1].split(".tif")[0]
+            image_meta_dict = {'filename_or_obj': name}
+            return {
+                'image': input_image,
+                'label': input_label,
+                'p_label': point_label,
+                'pt': pt,
+                'box': boxes,
+                # 'box_old':box_old,
+                'image_meta_dict': image_meta_dict,
+                'ground_truth_bboxes': bboxes
+            }
+
+        return input_image, input_label, points
 
     def __len__(self):
+
         return len(self.image_list)
+    
+    def min_max_normalize(self,image):
+        # Assuming image shape is n_channels x height x width
+        channel_mins=np.min(image,axis=(1,2,),keepdims=True)
+        channel_maxs=np.max(image,axis=(1,2),keepdims=True) 
+        normalized_array = (image-channel_mins)/(channel_maxs-channel_mins)
+        return normalized_array
 
-    def get_images_and_labels_path_for_loop(self):
-        self.label_list_robust = sorted([img for img in random.sample(self.label_list, 1)])
-        self.image_list_robust = sorted(
-            [self.image_list[self.label_list.index(image)] for image in self.label_list_robust])
-        print(f'val list:{self.label_list_robust}')
+    def __open_tiff__(self,image_path):
+        image=rasterio.open(image_path).read()
+        return image
+        
+    def resize_array(self,array, new_size):
+        # Transpose the array to height x width x channels
+        array = np.transpose(array, (1, 2, 0))
 
-        return self.image_list_robust, self.label_list_robust
+        array = array * 255
+        # Convert to PIL Image
+        pil_image = Image.fromarray(array.astype(np.uint8))
 
+        # Resize the image
+        resized_image = pil_image.resize(new_size)
 
+        # Convert back to numpy array
+        resized_array = np.array(resized_image)
 
-def get_imagse_and_labels_path(data_path, mode):
+        # Transpose back to channels x height x width
+        resized_array = np.transpose(resized_array, (2, 0, 1))
+        
+        resized_array = resized_array/255
 
-    label_list = sorted([os.path.join(data_path, mode, "labels", label_file) for label_file in os.listdir(os.path.join(data_path, mode, "labels"))])
-    image_list = sorted([os.path.join(data_path, mode, "images", image_file) for image_file in os.listdir(os.path.join(data_path, mode, "images"))])
+        return resized_array
 
-    print(mode, "data length:", len(label_list), len(image_list))
+class Ai4smallDataset():
+    def __init__(self,image_list,dict_format=True):
 
-    return label_list, image_list
+        self.image_list = image_list
+        self.image_ids = [x.split("/")[-1].split(".")[0] for x in self.image_list]
+        self.mask_list= [f"./original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
+        self.dict_format=dict_format
 
-class CryopppDataset(Dataset):
-    def __init__(self, args, data_path, transform=None, transform_msk=None, mode='train', prompt='random_click',
-                 plane=False, iteration = -1, train_sample = []):
+    def __getitem__(self, item):
 
-        self.train_list = train_sample
-        self.valid_list = []
-        self.args = args
+        image_path = self.image_list[item]
+        #image_path = os.path.join(self.image_path, image_name)
+        input_image = self.__open_tiff__(image_path)
+        input_image = self.min_max_normalize(input_image)
+        input_image = self.resize_array(input_image,(1024,1024))
+        #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
+        input_image = torch.tensor(input_image).float()
 
-        if iteration != -1:
-            label_list, name_list = self.get_images_and_labels_path_for_loop(data_path, mode)
-        else:
-            label_list, name_list = get_images_and_labels_path(data_path, mode)
+        label_path = self.mask_list[item]
+        #label_path = os.path.join(self.label_path, label_name)
+        input_label = self.__open_tiff__(label_path)
+        input_label = self.resize_array(input_label,(256,256),mask=True)
+        input_label = torch.tensor(input_label)
 
-        self.original_size = (256, 256)
-        self.target_length = 1024
-        self.name_list = name_list
-        self.label_list = label_list
-        self.data_path = data_path
-        self.mode = mode
-        self.prompt = prompt  # or bboxes
-        self.img_size = args.image_size
+        points_scale = np.array(input_image.shape[1:])[None, ::-1]
+        point_grids = build_all_layer_point_grids(
+            n_per_side=32,
+            n_layers=0,
+            scale_per_layer=1,
+        )
+        points_for_image = point_grids[0] * points_scale
+        in_points = torch.as_tensor(points_for_image)
+        in_labels = torch.ones(in_points.shape[0], dtype=torch.int)
+        points = (in_points, in_labels)
 
-        self.transform = transform
-        self.transform_msk = transform_msk
+        if self.dict_format:
+            inout = 1
+            point_label = 1
+            boxes = []
+            box_old = []
+            pt = np.array([0, 0])
+            bboxes = []
+
+            pt = points_for_image
+            point_label = np.array(in_labels)
+
+            name = self.image_ids[item]
+            image_meta_dict = {'filename_or_obj': name}
+            return {
+                'image': input_image[:3,:,:],
+                'label': input_label,
+                'p_label': point_label,
+                'pt': pt,
+                'box': boxes,
+                # 'box_old':box_old,
+                'image_meta_dict': image_meta_dict,
+                'ground_truth_bboxes': bboxes
+            }
+
+        return input_image, input_label, points
 
     def __len__(self):
-        return len(self.name_list)
 
-    def __getitem__(self, index):
+        return len(self.image_list)
+    
+    def min_max_normalize(self,image):
+        # Assuming image shape is n_channels x height x width
+        channel_mins=np.min(image,axis=(1,2,),keepdims=True)
+        channel_maxs=np.max(image,axis=(1,2),keepdims=True) 
+        normalized_array = (image-channel_mins)/(channel_maxs-channel_mins)
+        return normalized_array
 
-        inout = 1
-        point_label = 1
-        boxes = []
-        box_old = []
-        pt = np.array([0, 0])
-        bboxes = []
+    def __open_tiff__(self,image_path):
+        image=rasterio.open(image_path).read()
+        return image
+        
+    def resize_array(self,array, new_size,mask=False):
+        # Transpose the array to height x width x channels
+        array = np.transpose(array, (1, 2, 0))
+        if mask:
+            array=np.squeeze(array,2)
+            
 
-        """Get the images"""
-        name = self.name_list[index]
-        # img_path = os.path.join(self.data_path, self.mode, "images", name)
-        img_path = name
+        array = array * 255
+        # Convert to PIL Image
+        pil_image = Image.fromarray(array.astype(np.uint8))
 
-        mask_name = self.label_list[index]
-        msk_path = mask_name
+        # Resize the image
+        resized_image = pil_image.resize(new_size)
 
-        img = Image.open(img_path).convert('RGB')
-        mask = Image.open(msk_path).convert('L')
+        # Convert back to numpy array
+        resized_array = np.array(resized_image)
+        if mask:
+            resized_array=np.expand_dims(resized_array,2)
 
-        newsize = (self.img_size, self.img_size)
-        mask = mask.resize(newsize)
+        # Transpose back to channels x height x width
+        resized_array = np.transpose(resized_array, (2, 0, 1))
+        
+        resized_array = resized_array/255
 
-        if self.prompt == 'box':
-            img_name = img_path.split('/')[-1]
-            with open(os.path.join(self.data_path,"bbox.csv"),mode="r") as box_file:
-                reader = csv.reader(box_file)
-                for index, row in enumerate(reader):
-                    if index != 0 and self.mode == row[0] and img_name == row[1]:
-                        boxes = np.array([int(row[2]),int(row[3]),int(row[4]),int(row[5])])
-
-            if boxes.any():
-                boxes = boxes[None, :]
-                boxes = self.apply_boxes(boxes, self.original_size)
-                # box_torch = torch.as_tensor(boxes, dtype=torch.float, device="cuda")
-                # boxes = box_torch[None, :]
-                pass
-
-        if self.transform:
-            state = torch.get_rng_state()
-            img = self.transform(img)
-
-            torch.set_rng_state(state)
-
-            if self.prompt == 'points_grids':
-                point_grids = build_all_layer_point_grids(
-                    n_per_side=32,
-                    n_layers=0,
-                    scale_per_layer=1,
-                )
-                points_scale = np.array(img.shape[1:])[None, ::-1]
-                points_for_image = point_grids[0] * points_scale  # (1024 * 2)
-                in_points = torch.as_tensor(points_for_image)
-                in_labels = torch.ones(in_points.shape[0], dtype=torch.int)
-                # points = (in_points, in_labels)
-                pt = points_for_image
-                point_label = np.array(in_labels)
-
-            if self.transform_msk:
-                mask = self.transform_msk(mask)
-
-        name = name.split('/')[-1].split(".jpg")[0]
-        image_meta_dict = {'filename_or_obj': name}
-        return {
-            'image': img,
-            'label': mask,
-            'p_label': point_label,
-            'pt': pt,
-            'box': boxes,
-            # 'box_old':box_old,
-            'image_meta_dict': image_meta_dict,
-            'ground_truth_bboxes': bboxes
-        }
-
-    def get_images_and_labels_path_for_loop(self, data_path, mode):
-
-        if mode == 'train' or mode == "valid":
-            label_list = sorted([os.path.join(data_path, "training_set", "labels", label_file) for label_file in
-                                 os.listdir(os.path.join(data_path, "training_set", "labels"))])
-            image_list = sorted([os.path.join(data_path, "training_set", "images", image_file) for image_file in
-                                 os.listdir(os.path.join(data_path, "training_set", "images"))])
-
-            if mode == 'train':
-                label_train_list = sorted([img for img in random.sample(label_list, 5)])
-                image_train_list = sorted([image_list[label_list.index(image)] for image in label_train_list])
-
-                print(mode, "data length:", len(label_train_list), len(image_train_list))
-
-                self.train_list = image_train_list
-
-                print("train_dataset:")
-                for i in range(len(self.train_list)):
-                    print(self.train_list[i].split("/")[-1])
-
-                return label_train_list, image_train_list
-
-            elif mode == "valid":
-                image_train_list = sorted([img for img in random.sample(image_list, 1) if img not in self.train_list])
-                label_train_list = sorted([label_list[image_list.index(image)] for image in image_train_list])
-
-                self.valid_list = image_train_list
-
-                print("\nvalid_dataset:")
-                for i in range(len(self.valid_list)):
-                    print(self.valid_list[i].split("/")[-1])
-
-                print(mode, "data length:", len(label_train_list), len(image_train_list))
-
-                return label_train_list, image_train_list
-
-        elif mode == "test":
-
-            label_list = sorted([os.path.join(data_path, "testing_set", "labels", label_file) for label_file in
-                                 os.listdir(os.path.join(data_path, "testing_set", "labels"))])
-            image_list = sorted([os.path.join(data_path, "testing_set", "images", image_file) for image_file in
-                                 os.listdir(os.path.join(data_path, "testing_set", "images"))])
-
-            print(mode, "data length:", len(label_list), len(image_list))
-
-            return label_list, image_list
-
-    def apply_boxes(self, boxes: np.ndarray, original_size: Tuple[int, ...]) -> np.ndarray:
-        """
-        Expects a numpy array shape Bx4. Requires the original image size
-        in (H, W) format.
-        """
-        boxes = self.apply_coords(boxes.reshape(-1, 2, 2), original_size)
-        return boxes.reshape(-1, 4)
-
-    def apply_coords(self, coords: np.ndarray, original_size: Tuple[int, ...]) -> np.ndarray:
-        """
-        Expects a numpy array of length 2 in the final dimension. Requires the
-        original image size in (H, W) format.
-        """
-        old_h, old_w = original_size
-        new_h, new_w = self.get_preprocess_shape(
-            original_size[0], original_size[1], self.target_length
-        )
-        coords = deepcopy(coords).astype(float)
-        coords[..., 0] = coords[..., 0] * (new_w / old_w)
-        coords[..., 1] = coords[..., 1] * (new_h / old_h)
-        return coords
-
-    @staticmethod
-    def get_preprocess_shape(oldh: int, oldw: int, long_side_length: int) -> Tuple[int, int]:
-        """
-        Compute the output size given input size and target long side length.
-        """
-        scale = long_side_length * 1.0 / max(oldh, oldw)
-        newh, neww = oldh * scale, oldw * scale
-        neww = int(neww + 0.5)
-        newh = int(newh + 0.5)
-        return (newh, neww)
+        return resized_array
 
 
 def build_all_layer_point_grids(

@@ -11,20 +11,41 @@ from notebooks.SAM_conf import SAM_cfg
 from torch.utils.data import DataLoader
 from notebooks.SAM_conf.SAM_utils import *
 import function
-
+from glob import glob
+from models_samus.model_dict import get_model
 args = SAM_cfg.parse_args()
-
 GPUdevice = torch.device('cuda', args.gpu_device)
 
 net = get_network(args, args.net, use_gpu=args.gpu, gpu_device=GPUdevice, distribution=args.distributed)
+
 if args.pretrain:
     weights = torch.load(args.pretrain)
     net.load_state_dict(weights, strict=False)
 
+"""
+model_args={"modelname":"SAMUS",
+    "encoder_input_size":512,
+      "low_image_size":256,
+      "vit_name":'vit_b',
+      "sam_ckpt":"/home/geovisionaries/sambal/sam_boundary_adapter/checkpoint/sam_vit_b_01ec64.pth",
+      }
+class dotdict(dict):
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
+model_args = dotdict(model_args)
+net = get_model(model_args.modelname, args=model_args)
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+net=net.to(device)
+"""
+
+#optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.1)
 optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
 scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # learning rate decay
 
 '''load pretrained model'''
+
 if args.weights != 0:
     print(f'=> resuming from {args.weights}')
     assert os.path.exists(args.weights)
@@ -46,40 +67,33 @@ args.path_helper = set_log_dir('../logs', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
-'''segmentation data'''
-transform_train = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
-
-transform_train_seg = transforms.Compose([
-    transforms.Resize((args.out_size, args.out_size)),
-    transforms.ToTensor(),
-])
-
-transform_test = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
-
-transform_test_seg = transforms.Compose([
-    transforms.Resize((args.out_size, args.out_size)),
-    transforms.ToTensor(),
-])
-
 if args.dataset == 'CryoPPP':
-    '''Cryoppp data'''
-    train_dataset = CryopppDataset(args, args.data_path, transform=transform_train,
-                                   transform_msk=transform_train_seg, mode='train', prompt=args.prompt_approach)
-    valid_dataset = CryopppDataset(args, args.data_path, transform=transform_test,
-                                   transform_msk=transform_test_seg, mode='valid', prompt=args.prompt_approach)
+    args.get_updates()
+    df=pd.read_csv("/home/geovisionaries/sambal/sam_boundary_adapter/ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
+    df_region=df[df['file_id'].str.contains("AT")]
+    df_region_train=df_region[df_region['split']=='train']
+    df_region_val=df_region[df_region['split']=='val']
+    
+    train_image = df_region_train['file_id'].tolist()
+    train_label = df_region_train['file_id'].tolist()
+    train_data = TrainDataset(train_image, train_label,is_robustness=False)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=12, shuffle=True)
 
-    nice_train_loader = DataLoader(train_dataset, batch_size=args.b, shuffle=True, num_workers=8, pin_memory=True)
-    nice_valid_loader = DataLoader(valid_dataset, batch_size=args.b, shuffle=False, num_workers=8, pin_memory=True)
+    val_image = df_region_val['file_id'].tolist()
+    val_label = df_region_val['file_id'].tolist()
+    val_data = TestDataset(val_image, val_label,is_robustness=False)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=True)
     '''end'''
+if args.dataset=='ai4small':
 
-elif args.dataset == 'decathlon':
-    nice_train_loader, nice_valid_loader, transform_train, transform_val, train_list, val_list = get_decath_loader(args)
+    train_image_list=glob("/home/geospatial/sambal/sam_boundary_adapter/original/sentinel-2-asia/train/images/*")
+    val_image_list=glob("/home/geospatial/sambal/sam_boundary_adapter/original/sentinel-2-asia/validate/images/*")
+
+    train_data=Ai4smallDataset(train_image_list)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
+
+    val_data=Ai4smallDataset(val_image_list)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=True)
 
 '''checkpoint path and tensorboard'''
 
@@ -100,18 +114,18 @@ best_acc = 0.0
 best_tol = 1e6
 best_iou = 1e10
 best_dice = 1e10
-for epoch in range(settings.EPOCH):
+for epoch in range(300):
     if args.mod == 'sam_adpt':
         net.train()
         time_start = time.time()
-        loss = function.train_sam(args, net, optimizer, nice_train_loader, epoch, writer, vis=args.vis)
+        loss = function.train_sam(args, net, optimizer, train_dataloader, epoch, writer, vis=args.vis)
         logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
         time_end = time.time()
         print('time_for_training ', time_end - time_start)
 
         net.eval()
-        if epoch and epoch % args.val_freq == 0 or epoch == settings.EPOCH - 1:
-            tol, (eiou, edice) = function.validation_sam(args, nice_valid_loader, epoch, net, writer)
+        if True:
+            tol, (eiou, edice) = function.validation_sam(args, val_dataloader, epoch, net, writer)
             logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {epoch}.')
 
             if args.distributed != 'none':

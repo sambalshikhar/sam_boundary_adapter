@@ -9,6 +9,7 @@ from segment_anything.modeling.mask_decoder_adapter import  MaskDecoder
 from segment_anything.modeling.prompt_encoder import  PromptEncoder
 from segment_anything.modeling.sam_adatper import Sam
 from segment_anything.modeling.transformer import TwoWayTransformer
+from segment_anything.modeling.custom_decoder import SegmentationDecoder
 
 
 def build_sam_vit_h(args=None, checkpoint=None):

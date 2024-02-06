@@ -12,7 +12,9 @@ from torch.autograd import Function
 import time
 import logging
 import argparse
-
+from tqdm import tqdm
+import pandas as pd
+import wandb
 class Sam_model(nn.Module):
     def __init__(self,model_type,sam_checkpoint):
         super(Sam_model, self).__init__()
@@ -129,11 +131,11 @@ def evaluate(model,val_dataloader):
     dice_list = []
     with torch.no_grad():
 
-        for image,label,points in val_dataloader:
+        for image,label,points in tqdm(val_dataloader):
 
             image = image.to(device=device)
             label = label.to(device=device)
-
+            label = label[:,0,:,:].unsqueeze(0)
             denoised_img, pred = model(image, points)
 
             loss = lossfunc(pred,label)
@@ -157,9 +159,10 @@ def train(model,train_dataloader):
     train_loss = []
     iou_list = []
     dice_list = []
-    for image, label, points in train_dataloader:
+    for image, label, points in tqdm(train_dataloader):
         image = image.to(device=device)
         label = label.to(device=device)
+        label = label[:,0,:,:].unsqueeze(0)
         optimizer.zero_grad()
 
         denoised_img, pred = model(image, points)
@@ -177,34 +180,42 @@ def train(model,train_dataloader):
     iou_mean = np.average(iou_list)
     dice_mean = np.average(dice_list)
 
-    logger.info(
-        f"| epoch {epoch:3d} | "f"train loss {loss_mean:5.2f} | "f"iou {iou_mean:3.2f}  | "f"dice {dice_mean:3.2f}"
-    )
-
-
+    print()
+    print(f"| epoch {epoch:3d} | "f"train loss {loss_mean:5.2f} | "f"iou {iou_mean:3.2f}  | "f"dice {dice_mean:3.2f}")
+    
+    return loss_mean,iou_mean,dice_mean
+    
 
 if __name__ == '__main__':
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('-data_path', type=str, required=True, default='../dataset', help='The path of cryo-PPP data')
     parser.add_argument('-data_name', type=str, required=True, help='the name of your dataset')
     parser.add_argument('-exp_name', type=str, required=True, help='the name of your experiment')
     parser.add_argument('-bs', type=int, default=1, help='batch size for dataloader')
     parser.add_argument('-epochs', type=int, default=100, help='the number of training sessions')
     parser.add_argument('-lr', type=int, default=0.00005, help='learning rate')
     parser.add_argument('-model_type', type=str, default="vit_h", help='')
-    parser.add_argument('-sam_ckpt', default='../checkpoint/sam_vit_h_4b8939.pth', type=str, help='sam checkpoint path')
+    parser.add_argument('-sam_ckpt', default='/home/prateekjha/sam_boundary_adapter/checkpoint/sam_vit_h_4b8939.pth', type=str, help='sam checkpoint path')
     parser.add_argument('-save_path', type=str, required=True, help='the path to save your training result')
     args = parser.parse_args()
 
-    train_image = f'{args.data_path}/train/images/'
-    train_label = f'{args.data_path}/train/labels/'
-    train_data = TrainDataset(train_image, train_label,is_robustness=False)
+
+    # start a new experiment
+    wandb.init(project="sam_adapter_head")
+
+    df=pd.read_csv("/home/prateekjha/ai4boundaries_data/sampling/ai4boundaries_ftp_urls_all.csv")
+    df_region=df[df['file_id'].str.contains("AT")]
+    df_region_train=df_region[df_region['split']=='train']
+    df_region_val=df_region[df_region['split']=='val']
+    
+    train_image = df_region_train['file_id'].tolist()
+    train_label = df_region_train['file_id'].tolist()
+    train_data = TrainDataset(train_image, train_label,is_robustness=False,dict_format=True)
     train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
 
-    val_image = f'{args.data_path}/valid/images/'
-    val_label = f'{args.data_path}/valid/labels/'
-    val_data = TestDataset(val_image, val_label,is_robustness=False)
+    val_image = df_region_val['file_id'].tolist()
+    val_label = df_region_val['file_id'].tolist()
+    val_data = TestDataset(val_image, val_label,is_robustness=False,dict_format=True)
     val_dataloader = DataLoader(dataset=val_data, batch_size=args.bs, shuffle=True)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -221,26 +232,30 @@ if __name__ == '__main__':
 
     for epoch in range(args.epochs):
         epoch_start_time = time.time()
-        train(model,train_dataloader)
+        train_loss_mean,train_iou_mean,train_dice_mean=train(model,train_dataloader)
         val_loss,iou,dice = evaluate(model,val_dataloader)
 
         elapsed = time.time() - epoch_start_time
-        logger.info("-" * 89)
-        logger.info(
+        print("-" * 89)
+        print(
             f"| end of epoch {epoch:3d} | time: {elapsed:5.2f}s | "
             f"valid loss {val_loss:5.4f} | "f"iou {iou:3.2f}  | "f"dice {dice:3.2f}" )
-        logger.info("-" * 89)
+        print("-" * 89)
+        
+        wandb.log({"test_loss": train_loss_mean,
+                   "train_iou":train_iou_mean,
+                    "train_dice":train_dice_mean,
+                    "val_loss":val_loss,
+                    "val_iou":iou,
+                    "val_dice":dice})
 
         if (val_loss < best_loss) or (iou > best_iou) or (dice > best_dice) :
             best_loss = val_loss
             best_iou = iou
             best_dice = dice
             torch.save(model.state_dict(), f'{args.save_path}/head_prompt_{args.data_name}_{args.exp_name}.pt')
-            logger.info(f"Best model saved!")
+            print(f"Best model saved!")
+    
+            
 
-    logger.info(f'Head prompt {args.data_name} {args.exp_name} training is complete ! ')
-
-
-
-
-
+    print(f'Head prompt {args.data_name} {args.exp_name} training is complete ! ')

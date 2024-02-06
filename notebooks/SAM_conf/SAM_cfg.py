@@ -3,21 +3,21 @@ import argparse
 def str2bool(str):
 	return True if str.lower() == 'true' else False
 
-
+    #[2,2,2,2,2, 2,2,2,2,2, 2,2,2,2,2, 2,2,2,2,2, 2,2,2,2,2, 2,2,2,2,2, 2,2] 
 def parse_args():    
     parser = argparse.ArgumentParser()
     parser.add_argument('-net', type=str, required=True, help='net type')
     parser.add_argument('-baseline', type=str, default='unet', help='baseline net type')
     parser.add_argument('-seg_net', type=str, default='transunet', help='net type')
     parser.add_argument('-mod', type=str, required=False, help='mod type:seg,cls,val_ad')
-    parser.add_argument('-exp_name', type=str, required=True, help='net type')
+    parser.add_argument('-exp_name', type=str, required=False, help='net type')
     parser.add_argument('-prompt_approach', type=str, required=False, default="points_grids", help='the prompt approach: random_click or '
-                                                                          'points_grids')
-    parser.add_argument('-image_encoder_configuration',type=int, required=False, nargs='+',
-                        default=[3,3,3,3,3, 3,3,3,3,3, 3,3,3,3,3, 3,3,3,3,3, 3,3,3,3,3, 3,3,3,3,3, 3,3],
+                                                      'points_grids')
+    parser.add_argument('-image_encoder_configuration',type=int, required=False,
+                        default=[1,1,1,1,1, 1,1,1,1,1, 1,1,1,1,1, 1,1,1,1,1, 1,1,1,1,1, 1,1,1,1,1, 1,1],
                         help='image encoder configuration: 0: original sam. 1: space adapter. 2:MLP adapter. '
                              '3: space adapter + MLP adapter. ')
-    parser.add_argument('-sam_vit_model', type=str, required=False, default="h", help='')
+    parser.add_argument('-sam_vit_model', type=str, required=False, default="b", help='')
     parser.add_argument('-CryoPPP_image_sice', type=int, required=False, nargs='+', default=[4096, 4096], help='')
     parser.add_argument('-Groundtruth_path', type=str, required=False, help='')
     # token prompt
@@ -67,7 +67,7 @@ def parse_args():
     parser.add_argument('-sim_weights', type=str, default = 0, help='the weights sim')
     parser.add_argument('-distributed', default='none' ,type=str,help='multi GPU ids to use')
     parser.add_argument('-dataset', default='CryoPPP' ,type=str,help='dataset name')
-    parser.add_argument('-sam_ckpt', default=None , help='sam checkpoint address')
+    parser.add_argument('-sam_ckpt', default="./checkpoint/sam_vit_b_01ec64.pth" , help='sam checkpoint address')
     parser.add_argument('-thd', type=bool, default=False , help='3d or not')
     parser.add_argument('-chunk', type=int, default=96 , help='crop volume depth')
     parser.add_argument('-num_sample', type=int, default=4 , help='sample pos and neg')
@@ -76,7 +76,7 @@ def parse_args():
     parser.add_argument(
     '-data_path',
     type=str,
-    required=True,
+    required=False,
     default='../dataset',
     help='The path of segmentation data')
     # '../dataset/RIGA/DiscRegion'

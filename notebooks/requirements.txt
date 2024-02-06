@@ -1,0 +1,11 @@
+einops==0.7.0
+matplotlib
+monai
+numpy
+pandas
+Pillow
+pycocotools
+python_dateutil
+rasterio
+tensorboardX
+tqdm

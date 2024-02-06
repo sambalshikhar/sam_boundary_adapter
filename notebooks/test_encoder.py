@@ -51,42 +51,15 @@ args.path_helper = set_log_dir('../logs', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
-'''segmentation data'''
-transform_train = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
+df=pd.read_csv("/home/geovisionaries/sambal/sam_boundary_adapter/ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
+df_region=df[df['file_id'].str.contains("AT")]
+df_region_test=df_region[df_region['split']=='test']
 
-transform_train_seg = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Resize((args.out_size, args.out_size)),
-])
-
-transform_test = transforms.Compose([
-    transforms.Resize((args.image_size, args.image_size)),
-    transforms.ToTensor(),
-])
-
-transform_test_seg = transforms.Compose([
-    transforms.ToTensor(),
-    transforms.Resize((args.out_size, args.out_size)),
-
-])
-'''data end'''
-if args.dataset == 'CryoPPP':
-    # turkey_valid_dataset = CryopppDataset(args, args.data_path, transform=transform_test,
-    #                                       transform_msk=transform_test_seg, mode='test', prompt=args.prompt_approach)
-
-    turkey_valid_dataset = CryopppDataset(args, args.data_path, transform=transform_test,
-                                          transform_msk=transform_test_seg, mode='test', prompt=args.prompt_approach)
-
-    nice_test_loader = DataLoader(turkey_valid_dataset, batch_size=args.b, shuffle=False, num_workers=8,
-                                  pin_memory=True)
-    '''end'''
-
-
-elif args.dataset == 'decathlon':
-    nice_train_loader, nice_test_loader, transform_train, transform_val, train_list, val_list = get_decath_loader(args)
+test_image = df_region_test['file_id'].tolist()
+test_label = df_region_test['file_id'].tolist()
+test_data = TestDataset(test_image, test_label,is_robustness=False)
+test_dataloader = DataLoader(dataset=test_data, batch_size=1, shuffle=True)
+'''end'''
 
 '''begain valuation'''
 best_acc = 0.0
@@ -94,5 +67,5 @@ best_tol = 1e4
 
 if args.mod == 'sam_adpt':
     net.eval()
-    tol, (eiou, edice) = function.Test_sam(args, nice_test_loader, start_epoch, net)
+    tol, (eiou, edice) = function.Test_sam(args, test_dataloader, start_epoch, net)
     logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {start_epoch}.')

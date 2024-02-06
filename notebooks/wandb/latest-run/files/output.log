@@ -1,0 +1,14 @@
+Traceback (most recent call last):
+  File "/home/geovisionaries/sambal/sam_boundary_adapter/notebooks/train_finetune.py", line 76, in <module>
+    df=pd.read_csv("/home/prateekjha/ai4boundaries_data/sampling/ai4boundaries_ftp_urls_all.csv")
+  File "/home/geovisionaries/sambal/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 948, in read_csv
+    return _read(filepath_or_buffer, kwds)
+  File "/home/geovisionaries/sambal/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 611, in _read
+    parser = TextFileReader(filepath_or_buffer, **kwds)
+  File "/home/geovisionaries/sambal/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 1448, in __init__
+    self._engine = self._make_engine(f, self.engine)
+  File "/home/geovisionaries/sambal/lib/python3.10/site-packages/pandas/io/parsers/readers.py", line 1705, in _make_engine
+    self.handles = get_handle(
+  File "/home/geovisionaries/sambal/lib/python3.10/site-packages/pandas/io/common.py", line 863, in get_handle
+    handle = open(
+FileNotFoundError: [Errno 2] No such file or directory: '/home/prateekjha/ai4boundaries_data/sampling/ai4boundaries_ftp_urls_all.csv'

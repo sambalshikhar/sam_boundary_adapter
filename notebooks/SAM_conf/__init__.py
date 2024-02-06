@@ -2,7 +2,7 @@
 
 author baiyu
 """
-from notebooks.SAM_conf import global_settings as settings
+from SAM_conf import global_settings as settings
 
 class Settings:
     def __init__(self, settings):
