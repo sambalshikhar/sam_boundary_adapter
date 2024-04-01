@@ -12,39 +12,16 @@ from torch.utils.data import DataLoader
 from notebooks.SAM_conf.SAM_utils import *
 import function
 from glob import glob
-from models_samus.model_dict import get_model
 args = SAM_cfg.parse_args()
 GPUdevice = torch.device('cuda', args.gpu_device)
+from torch.optim import SGD
+from torch.optim.lr_scheduler import CosineAnnealingLR
 
 net = get_network(args, args.net, use_gpu=args.gpu, gpu_device=GPUdevice, distribution=args.distributed)
 
 if args.pretrain:
     weights = torch.load(args.pretrain)
     net.load_state_dict(weights, strict=False)
-
-"""
-model_args={"modelname":"SAMUS",
-    "encoder_input_size":512,
-      "low_image_size":256,
-      "vit_name":'vit_b',
-      "sam_ckpt":"/home/geovisionaries/sambal/sam_boundary_adapter/checkpoint/sam_vit_b_01ec64.pth",
-      }
-class dotdict(dict):
-    __getattr__ = dict.get
-    __setattr__ = dict.__setitem__
-    __delattr__ = dict.__delitem__
-
-model_args = dotdict(model_args)
-net = get_model(model_args.modelname, args=model_args)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-net=net.to(device)
-"""
-
-#optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.1)
-optimizer = optim.Adam(net.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # learning rate decay
-
-'''load pretrained model'''
 
 if args.weights != 0:
     print(f'=> resuming from {args.weights}')
@@ -67,8 +44,19 @@ args.path_helper = set_log_dir('../logs', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
-if args.dataset == 'CryoPPP':
-    args.get_updates()
+if args.fine_tuning_configuration: 
+    sam_no_freeze_block = [f"blocks.{idx}." for idx,i in enumerate(args.fine_tuning_configuration) if i == 1 ]
+
+'''Train'''
+for n, value in net.named_parameters():
+    if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n):
+        if args.fine_tuning_configuration:
+            if 1 not in [1 for val in sam_no_freeze_block if val in n]: 
+                value.requires_grad = False
+        else:
+            value.requires_grad = False
+
+if args.dataset == 'ai4boudaries':
     df=pd.read_csv("/home/geovisionaries/sambal/sam_boundary_adapter/ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
     df_region=df[df['file_id'].str.contains("AT")]
     df_region_train=df_region[df_region['split']=='train']
@@ -77,7 +65,7 @@ if args.dataset == 'CryoPPP':
     train_image = df_region_train['file_id'].tolist()
     train_label = df_region_train['file_id'].tolist()
     train_data = TrainDataset(train_image, train_label,is_robustness=False)
-    train_dataloader = DataLoader(dataset=train_data, batch_size=12, shuffle=True)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
 
     val_image = df_region_val['file_id'].tolist()
     val_label = df_region_val['file_id'].tolist()
@@ -93,8 +81,9 @@ if args.dataset=='ai4small':
     train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
 
     val_data=Ai4smallDataset(val_image_list)
-    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=True)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=False)
 
+    
 '''checkpoint path and tensorboard'''
 
 checkpoint_path = os.path.join(settings.CHECKPOINT_PATH, args.net, settings.TIME_NOW)
@@ -114,18 +103,32 @@ best_acc = 0.0
 best_tol = 1e6
 best_iou = 1e10
 best_dice = 1e10
+
+if args.fine_tuning_configuration: 
+    sam_no_freeze_block = [f"blocks.{idx}." for idx,i in enumerate(args.fine_tuning_configuration) if i == 1 ]
+
+#optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.1)
+optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=0.0001, betas=(0.9, 0.999),weight_decay=0.0)
+total_iterations_per_epoch = len(train_dataloader)  # Adjust based on your requirements
+T_max = total_iterations_per_epoch*10
+scheduler = CosineAnnealingLR(optimizer, T_max=T_max, eta_min=3e-6)
+
+
+
 for epoch in range(300):
     if args.mod == 'sam_adpt':
         net.train()
         time_start = time.time()
-        loss = function.train_sam(args, net, optimizer, train_dataloader, epoch, writer, vis=args.vis)
+        loss= function.train_sam(args, net, optimizer, train_dataloader, epoch, writer,scheduler,vis=args.vis)
+        #current_lr=scheduler.get_last_lr()[0]
         logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
         time_end = time.time()
+        
         print('time_for_training ', time_end - time_start)
-
         net.eval()
+        
         if True:
-            tol, (eiou, edice) = function.validation_sam(args, val_dataloader, epoch, net, writer)
+            tol, (eiou, edice) = function.validation_sam(args, val_dataloader, epoch, net,writer)
             logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {epoch}.')
 
             if args.distributed != 'none':

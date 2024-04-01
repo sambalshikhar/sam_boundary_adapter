@@ -37,6 +37,52 @@ class LayerNorm2d(nn.Module):
         x = (x - u) / torch.sqrt(s + self.eps)
         x = self.weight[:, None, None] * x + self.bias[:, None, None]
         return x
+   
+class Adapter_inception_conv(nn.Module):
+    def __init__(self, in_channels):
+        super(Adapter_inception_conv, self).__init__()
+
+        int_dim=in_channels//3
+        self.conv_low_pass_1 = nn.Conv2d(in_channels,int_dim, kernel_size=(1, 1))
+        self.layernorm_1=LayerNorm2d(int_dim)
+        self.conv_low_pass_2 = nn.Conv2d(in_channels,int_dim, kernel_size=(1, 1))
+        self.layernorm_2=LayerNorm2d(int_dim)
+        self.conv_low_pass_3 = nn.Conv2d(in_channels,in_channels, kernel_size=(1, 1))
+        self.layernorm_3=LayerNorm2d(in_channels)
+        
+        # 1x1 Convolution
+        self.conv1x1 = nn.Conv2d(int_dim,int_dim, kernel_size=(1, 1))
+        self.layernorm_1x1=LayerNorm2d(int_dim)
+
+        # 3x3 Convolution
+        self.conv3x3 = nn.Conv2d(int_dim,int_dim, kernel_size=(3, 3), padding=1)
+        self.layernorm_3x3=LayerNorm2d(int_dim)
+
+        # 5x5 Convolution
+        self.conv5x5 = nn.Conv2d(int_dim,int_dim, kernel_size=(5, 5), padding=2)
+        self.layernorm_5x5=LayerNorm2d(int_dim)
+        
+        
+        self.proj=nn.Conv2d(in_channels,in_channels,kernel_size=(1, 1))
+        self.layernorm_proj=LayerNorm2d(in_channels)
+        
+    def forward(self, x):
+        
+        conv_low_pass_1=F.relu(self.conv_low_pass_1(x.permute(0,3,1,2)))
+        conv_low_pass_2=F.relu(self.conv_low_pass_2(x.permute(0,3,1,2)))
+        conv_low_pass_3=F.relu(self.conv_low_pass_3(x.permute(0,3,1,2)))
+        # Apply each convolutional layer
+        out1x1 = F.relu(self.conv1x1(conv_low_pass_1))
+        out3x3 = F.relu(self.conv3x3(conv_low_pass_1))
+        out5x5 = F.relu(self.conv5x5(conv_low_pass_2))
+
+        # Concatenate along the last axis (axis=1 in PyTorch)
+        concat_feature=torch.cat([out1x1, out3x3, out5x5], dim=1)
+        out_feature=F.relu(self.proj(concat_feature))
+        #out_feature=out_feature
+        out_feature=out_feature.permute(0,2,3,1)+x
+        
+        return out_feature
 
 
 class Adapter_inception(nn.Module):
@@ -57,7 +103,6 @@ class Adapter_inception(nn.Module):
         self.relu=nn.ReLU()
         
     def forward(self, x):
-        
         conv_low_pass=F.relu(self.conv_low_pass(x.permute(0,3,1,2)))
         # Apply each convolutional layer
         out1x1 = F.relu(self.conv1x1(conv_low_pass))
@@ -108,7 +153,6 @@ class Adapter_conv(nn.Module):
             x = x + xs
         else:
             x = xs
-
         return x
     
 class Adapter(nn.Module):

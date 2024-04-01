@@ -2,29 +2,30 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-class SegmentationDecoder(nn.Module):
-    def __init__(self, vit_embedding_size=256, cnn_embedding_size=256):
-        super(SegmentationDecoder, self).__init__()
+class DecoderBlock(nn.Module):
+    def __init__(self, in_channels=256, out_channels=1):
+        super(DecoderBlock, self).__init__()
 
-        # Upsampling blocks
-        self.upconv1 = nn.ConvTranspose2d(vit_embedding_size, 128, kernel_size=4, stride=2, padding=1)
-        self.upconv2 = nn.ConvTranspose2d(128, 64, kernel_size=4, stride=2, padding=1)
-        #self.upconv3 = nn.ConvTranspose2d(64, 32, kernel_size=4, stride=2, padding=1)
-        self.mlp=nn.Linear(vit_embedding_size*2,vit_embedding_size)
-       
-        # Final convolution for segmentation map
-        self.final_conv = nn.Conv2d(64, 1, kernel_size=1)
+        # First upsampling layer using bilinear interpolation
+        self.upsample1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
-    def forward(self, vit_embedding,cnn_embedding):
-        #print(vit_embedding.size(),cnn_embedding.size())
-        # Upsampling with concatenation
-        x = torch.cat((vit_embedding, cnn_embedding), dim=1)
-        x = self.mlp(x.permute(0,2,3,1)).permute(0,3,1,2)
-        x = F.relu(x)
+        # Convolutional layer between the upsampling layers
+        self.conv_between = nn.Conv2d(in_channels, in_channels // 2, kernel_size=3, stride=1, padding=1)
+        self.relu_between = nn.ReLU()
 
-        x = F.relu(self.upconv1(x))
-        x = F.relu(self.upconv2(x))
-        # Final convolution for segmentation map
-        segmentation_map = self.final_conv(x)
+        # Second upsampling layer using bilinear interpolation
+        self.upsample2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
 
-        return segmentation_map
+        # Convolutional layers
+        self.conv1 = nn.Conv2d(in_channels // 2, in_channels//4, kernel_size=3, stride=1, padding=1)
+        self.relu1 = nn.ReLU()
+        self.conv2 = nn.Conv2d(in_channels//4, out_channels, kernel_size=3, stride=1, padding=1)
+
+    def forward(self, x):
+        #x=x.permute(0,3,1,2)
+        x = self.upsample1(x)
+        x = self.relu_between(self.conv_between(x))
+        x = self.upsample2(x)
+        x = self.relu1(self.conv1(x))
+        x = self.conv2(x)
+        return x

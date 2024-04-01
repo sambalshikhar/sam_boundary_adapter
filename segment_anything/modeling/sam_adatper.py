@@ -5,8 +5,8 @@ from torch.nn import functional as F
 
 from typing import Any, Dict, List, Tuple
 
-from segment_anything.modeling.image_encoder_adapter import ImageEncoderViT
-from segment_anything.modeling.mask_decoder_adapter import MaskDecoder
+from segment_anything.modeling.image_encoder import ImageEncoderViT
+from segment_anything.modeling.mask_decoder import MaskDecoder
 from segment_anything.modeling.prompt_encoder import PromptEncoder
 
 

@@ -4,8 +4,8 @@ from pathlib import Path
 import urllib.request
 import torch
 
-from segment_anything.modeling.image_encoder_adapter import ImageEncoderViT
-from segment_anything.modeling.mask_decoder import  MaskDecoder
+from segment_anything.modeling.image_encoder_series import ImageEncoderViT
+from segment_anything.modeling.mask_decoder  import  MaskDecoder
 from segment_anything.modeling.prompt_encoder import  PromptEncoder
 from segment_anything.modeling.sam_adatper import Sam
 from segment_anything.modeling.transformer import TwoWayTransformer

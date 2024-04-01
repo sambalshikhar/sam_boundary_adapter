@@ -232,9 +232,10 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
     with tqdm(total=len(train_loader), desc=f'Epoch {epoch}', unit='img') as pbar:
         for pack in train_loader:
             imgs = pack['image'].to(dtype=torch.float32, device=GPUdevice)
+
             masks = pack['label'].to(dtype=torch.float32, device=GPUdevice)
-            #masks = masks[:,0,:,:]
-            #masks = masks.unsqueeze(0)
+            masks = masks[:,0,:,:]
+            masks = masks.unsqueeze(0)
             # for k,v in pack['image_meta_dict'].items():
             #     print(k)
             # del pack['pt']
@@ -293,12 +294,12 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
             
             '''Train'''
             for n, value in net.named_parameters():
-                if ("_Adapter" not in n) and ("decoder" not in n) and ("norm_entry" not in n):
+                if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n):
                     if args.fine_tuning_configuration:
                         if 1 not in [1 for val in sam_no_freeze_block if val in n]: 
                             value.requires_grad = False
                     else:
-                        value.requires_grad = False
+                      value.requires_grad = False
             
             imge = net.image_encoder(imgs)  # image embeddings
 
@@ -331,6 +332,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
 
             optimizer.step()
             optimizer.zero_grad()
+            #schedulers.step()
 
             '''vis images'''
             if vis:
@@ -381,8 +383,8 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
         for ind, pack in enumerate(val_loader):
             imgsw = pack['image'].to(dtype=torch.float32, device=GPUdevice)
             masksw = pack['label'].to(dtype=torch.float32, device=GPUdevice)
-            #masksw = masksw[:,0,:,:]
-            #masksw = masksw.unsqueeze(0)
+            masksw = masksw[:,0,:,:]
+            masksw = masksw.unsqueeze(0)
 
             name = pack['image_meta_dict']['filename_or_obj']
 

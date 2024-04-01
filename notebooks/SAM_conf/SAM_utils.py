@@ -104,14 +104,22 @@ def get_network(args, net, use_gpu=True, gpu_device = 0, distribution = True):
     elif net == 'sam_adapter':
         from segment_anything.build_sam_adapter import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_lora':
+        print(f"Building:{net}")
+        from segment_anything.build_sam_adapter_lora import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_series':
+        from segment_anything.build_sam_adapter_series import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_mix':
+        from segment_anything.build_sam_adapter_mix import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_para':
+        from segment_anything.build_sam_adapter_para import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
     elif net == 'sam_fineTuning':
         from segment_anything.build_sam_adapter import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
-    elif net == 'PromptVit':
-        if args.sam_vit_model == "h":
-            if args.token_method == "new":
-                from segment_anything.build_sam_promptvit_new_token import sam_model_registry
-                net = sam_model_registry['vit_h'](args,checkpoint=args.sam_ckpt).to(device)
 
     else:
         print('the network name you have entered is not supported yet')
