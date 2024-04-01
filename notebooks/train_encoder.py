@@ -109,17 +109,12 @@ if args.fine_tuning_configuration:
 
 #optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.1)
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=0.0001, betas=(0.9, 0.999),weight_decay=0.0)
-total_iterations_per_epoch = len(train_dataloader)  # Adjust based on your requirements
-T_max = total_iterations_per_epoch*10
-scheduler = CosineAnnealingLR(optimizer, T_max=T_max, eta_min=3e-6)
-
-
 
 for epoch in range(300):
     if args.mod == 'sam_adpt':
         net.train()
         time_start = time.time()
-        loss= function.train_sam(args, net, optimizer, train_dataloader, epoch, writer,scheduler,vis=args.vis)
+        loss= function.train_sam(args, net, optimizer, train_dataloader, epoch, writer,vis=args.vis)
         #current_lr=scheduler.get_last_lr()[0]
         logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
         time_end = time.time()
