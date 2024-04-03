@@ -4,4 +4,12 @@ image
 reproduction
 runs
 wandb
-BsiNet-torch
+FAUNet/data_set
+FAUNet/numpyarrays-20240326T091549Z-001.zip
+FAUNet/numpyarrays
+BsiNet-torch/vgg16convs.mat
+FAUNet/FAUNET_weights
+FAUNet/__pycache__
+BsiNet-torch/__pycache__
+BsiNet-torch/model
+BsiNet-torch/imgs
