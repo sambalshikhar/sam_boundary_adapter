@@ -6,7 +6,7 @@ import math
 
 from typing import Optional, Tuple, Type
 import numpy as np
-from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_conv,Adapter_inception
+from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_conv,Adapter_inception,BasicRFB
 
 
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
@@ -68,7 +68,6 @@ class ImageEncoderViT(nn.Module):
             )
 
         self.blocks = nn.ModuleList()
-        self.conv_embed=  SingleCNNEmbed(in_chans=3,patchsize=patch_size,embed_dim=embed_dim)
         #mlp_ratios=random_array = np.random.uniform(0.25, 0.7, size=depth)
         for i in range(depth):
             block = Block(
@@ -107,12 +106,11 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        conv_feature=self.conv_embed(x)
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
         for blk in self.blocks:
-            x,conv_feature = blk(x,conv_feature)
+            x = blk(x)
         x = self.neck(x.permute(0, 3, 1, 2))
         return x
 
@@ -185,7 +183,7 @@ class Block(nn.Module):
             pass
         """    
         #self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
-        self.Space_Adapter_1= Adapter_inception(dim) 
+        self.Space_Adapter_1= BasicRFB(dim,dim)
         #self.Space_Adapter_2=Adapter(dim,skip_connect=True,mlp_ratio=mlp_ratio_adapter)
         # with skip connection
         # self.scale = scale
@@ -202,32 +200,26 @@ class Block(nn.Module):
             self.refine_conv=SingleConv(in_channels=dim, out_channels=dim)
         """
             
-    def forward(self, x: torch.Tensor,conv_feature) -> torch.Tensor:
-        x=self.Space_Adapter_1(x)
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        #x=self.Space_Adapter_1(x.permute(0,3,1,2)).permute(0,2,3,1)
         shortcut = x
-    
+        # Window partition
+        x = self.norm1(x)
         if self.window_size > 0:
             H, W = x.shape[1], x.shape[2]
             x, pad_hw = window_partition(x, self.window_size)
-        
-        x = self.norm1(x)
-                
 
         x = self.attn(x)
-            
+        x = self.Space_Adapter_1(x.permute(0,3,1,2)).permute(0,2,3,1)
+        # Reverse window partition
         if self.window_size > 0:
             x = window_unpartition(x, self.window_size, pad_hw, (H, W))
-            
+
         x = shortcut + x
-        
-        #if self.window_size==0:
-            #sax=self.cross_attention_block_1(x,conv_feature,conv_feature)
-            #conv_feature=self.refine_conv(conv_feature.permute(0, 3, 1, 2)).permute(0, 2, 3, 1)
-            #x=x+(self.alpha*sax)
-            
         x = x + self.mlp(self.norm2(x))
-                
-        return x,conv_feature
+        
+        return x
+        
 
 class SpatialPriorModule(nn.Module):
     def __init__(self, inplanes=64, embed_dim=384, with_cp=False):

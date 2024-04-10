@@ -332,7 +332,8 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
 
             optimizer.step()
             optimizer.zero_grad()
-            schedulers.step()
+            if schedulers:
+                schedulers.step()
 
             '''vis images'''
             if vis:
