@@ -294,14 +294,14 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
             
             '''Train'''
             for n, value in net.named_parameters():
-                if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n):
+                if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n) and ("sa_gate" not in n) and ("cnn_embed" not in n) and ("norm3" not in n)  and ("conv_block" not in n):
                     if args.fine_tuning_configuration:
                         if 1 not in [1 for val in sam_no_freeze_block if val in n]: 
                             value.requires_grad = False
                     else:
                       value.requires_grad = False
             
-            imge = net.image_encoder(imgs)  # image embeddings
+            imge,conv1,conv2 = net.image_encoder(imgs)  # image embeddings
 
             if args.prompt_approach == 'box':
                 se, de = net.prompt_encoder(
@@ -316,6 +316,8 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                     masks=None,
                 )
 
+
+            """
             pred, _ = net.mask_decoder(  # batched predicted masks
                 image_embeddings=imge,
                 image_pe=net.prompt_encoder.get_dense_pe(),
@@ -323,6 +325,12 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                 sparse_prompt_embeddings=se,
                 dense_prompt_embeddings=de,
                 multimask_output=False,
+            )
+            """
+
+            #print(imge.size())
+            pred = net.mask_decoder(  # batched predicted masks
+                imge,conv1,conv2
             )
             loss = lossfunc(pred, masks)  # pred -> mask  masks -> label
 
@@ -435,7 +443,7 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
 
                 '''test'''
                 with torch.no_grad():
-                    imge = net.image_encoder(imgs)
+                    imge,conv_1,conv_2 = net.image_encoder(imgs)
 
                     if args.prompt_approach == 'box':
                         se, de = net.prompt_encoder(
@@ -450,6 +458,7 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                             masks=None,
                         )
 
+                    """
                     pred, _ = net.mask_decoder(
                         image_embeddings=imge,
                         image_pe=net.prompt_encoder.get_dense_pe(),
@@ -457,6 +466,8 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                         dense_prompt_embeddings=de,
                         multimask_output=False,
                     )
+                    """
+                    pred=net.mask_decoder(imge,conv_1,conv_2)
 
                     tot += lossfunc(pred, masks)
 

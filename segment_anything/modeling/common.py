@@ -83,6 +83,74 @@ class Adapter_inception_conv(nn.Module):
         out_feature=out_feature.permute(0,2,3,1)+x
         
         return out_feature
+    
+
+class SAGate(nn.Module):
+    def __init__(self, channel_dim):
+        super(SAGate, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(channel_dim * 2, channel_dim * 2),
+            nn.ReLU(),
+            nn.Linear(channel_dim * 2, channel_dim * 2)
+        )
+        self.spatial_gate_conv = nn.Conv2d(channel_dim * 2, channel_dim * 2, kernel_size=1, stride=1, groups=2)
+
+    def forward(self, fc, ft):
+        # Ensure the features are in channel-first format for processing
+        fc = fc.permute(0, 3, 1, 2)
+        ft = ft.permute(0, 3, 1, 2)
+        
+        # Feature Separation Part
+        f_concat = torch.cat((fc, ft), dim=1) # Assuming the features are of the same spatial dimensions
+        i = F.adaptive_avg_pool2d(f_concat, (1, 1)).view(f_concat.size(0), -1) # Global descriptor
+        attention_vector = torch.sigmoid(self.mlp(i)).view(f_concat.size(0), -1, 1, 1)
+        w_c, w_t = attention_vector.chunk(2, dim=1)
+
+        filter_c = fc * w_c
+        filter_t = ft * w_t
+
+        rec_c = filter_c + fc
+        rec_t = filter_t + ft
+
+        # Feature Aggregation Part
+        f_concate = torch.cat((rec_c, rec_t), dim=1) # Concatenation at specific spatial positions
+        spatial_gates = self.spatial_gate_conv(f_concate)
+        
+        # We will now reshape to apply softmax on the correct axis
+        b, c, h, w = spatial_gates.size()
+        spatial_gates = spatial_gates.view(b, 2, c // 2, h, w)
+        ac, at = F.softmax(spatial_gates, dim=2).chunk(2, dim=1)
+        ac, at = ac.squeeze(1), at.squeeze(1)
+
+        # Weighted sum
+        m = rec_c * ac + rec_t * at
+
+        # Convert back to channel-last
+        m = m.permute(0, 2, 3, 1)
+
+        return m
+
+class AugAdapter(nn.Module):
+    def __init__(self, D_features, mlp_ratio=0.25, num_heads=12, act_layer=nn.GELU, skip_connect=True): #0.25
+        super().__init__()
+        self.skip_connect = skip_connect
+        D_hidden_features = int(D_features * mlp_ratio)
+        self.act = act_layer()
+        self.D_fc1 = nn.Linear(D_features, D_hidden_features)
+        self.D_fc2 = nn.Linear(D_hidden_features, D_features)
+        self.aug_fc = nn.Linear(num_heads, D_hidden_features)
+        
+    def forward(self, x, important_key):
+        # x is (BT, HW+1, D)
+        xs = self.D_fc1(x)
+        aug = self.aug_fc(important_key)
+        xs = self.act(xs * aug)
+        xs = self.D_fc2(xs)
+        if self.skip_connect:
+            x = x + xs
+        else:
+            x = xs
+        return x
 
 
 class Adapter_inception(nn.Module):

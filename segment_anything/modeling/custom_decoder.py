@@ -2,6 +2,55 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+class upDecoder(nn.Module):
+    def __init__(self):
+        super(upDecoder, self).__init__()
+        # Define the decoder layers
+        self.up_1 = nn.Sequential(
+            nn.ConvTranspose2d(256, 256, kernel_size=2, stride=2),  # Output size: (N, 512, 128, 128)
+            nn.Conv2d(256,128, kernel_size=3, padding=1),           # Output size: (N, 512, 128, 128)
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+        
+        self.up_2=nn.Sequential(
+            nn.ConvTranspose2d(128,128, kernel_size=2, stride=2),  # Output size: (N, 256, 256, 256)
+            nn.Conv2d(128,64, kernel_size=3, padding=1),           # Output size: (N, 256, 256, 256)
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+        )
+        
+        self.conv_1=nn.Sequential(
+            nn.Conv2d(64,32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
+        self.conv_2=nn.Sequential(
+            nn.Conv2d(32,16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16,1, kernel_size=1)                          # Output size: (N, 1, 1024, 1024)
+        )
+        self.merge_1=nn.Sequential(
+            nn.Conv2d(256*2,256, kernel_size=1),
+            nn.ReLU()
+        )
+        self.merge_2=nn.Sequential(
+            nn.Conv2d(128*2,128, kernel_size=1),
+            nn.ReLU()
+        )
+
+    def forward(self, x,conv_1,conv_2):
+        x=F.normalize(torch.concat([x,conv_1],axis=1),1)
+        x=self.merge_1(x)
+        x=self.up_1(x)
+        x=F.normalize(torch.concat([x,conv_2],axis=1),1)
+        x=self.merge_2(x)
+        x=self.up_2(x)
+        x=self.conv_1(x)
+        x=self.conv_2(x)
+        return x
+    
 class DecoderBlock(nn.Module):
     def __init__(self, in_channels=256, out_channels=1):
         super(DecoderBlock, self).__init__()

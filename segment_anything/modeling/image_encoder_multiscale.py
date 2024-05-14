@@ -9,6 +9,30 @@ import numpy as np
 from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_conv,Adapter_inception,BasicRFB
 
 
+class ConvolutionalEncoder(nn.Module):
+    def __init__(self):
+        super(ConvolutionalEncoder, self).__init__()
+        # Define the convolutional layers
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1)   # Output: (32, 512, 512)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)  # Output: (64, 256, 256)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1) # Output: (128, 128, 128)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # Output: (256, 64, 64)
+        self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1) # Output: (512, 32, 32)
+        self.conv6 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1) # Output: (1024, 16, 16)
+
+        # Define the activation function
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        # Apply convolutional layers with ReLU activation
+        x = self.relu(self.conv1(x))
+        x256 = self.relu(self.conv2(x))
+        x128 = self.relu(self.conv3(x256))
+        x64 = self.relu(self.conv4(x128))
+
+        # Return all feature maps
+        return x64,x128
+
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
 class ImageEncoderViT(nn.Module):
     def __init__(
@@ -66,7 +90,7 @@ class ImageEncoderViT(nn.Module):
             self.pos_embed = nn.Parameter(
                 torch.zeros(1, img_size // patch_size, img_size // patch_size, embed_dim)
             )
-
+        self.conv_block=ConvolutionalEncoder()
         self.blocks = nn.ModuleList()
         #mlp_ratios=random_array = np.random.uniform(0.25, 0.7, size=depth)
         for i in range(depth):
@@ -106,13 +130,14 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        conv1,conv2=self.conv_block(x)
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
         for blk in self.blocks:
             x = blk(x)
         x = self.neck(x.permute(0, 3, 1, 2))
-        return x
+        return x,conv1,conv2
 
 
 class Block(nn.Module):
@@ -183,7 +208,7 @@ class Block(nn.Module):
             pass
         """    
         #self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
-        self.Space_Adapter_1= BasicRFB(dim,dim)
+        self.Space_Adapter_1=Adapter_inception(dim)
         #self.Space_Adapter_2=Adapter(dim,skip_connect=True,mlp_ratio=mlp_ratio_adapter)
         # with skip connection
         # self.scale = scale
@@ -203,14 +228,14 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         #x=self.Space_Adapter_1(x.permute(0,3,1,2)).permute(0,2,3,1)
         shortcut = x
-        # Window partition
+        x = self.Space_Adapter_1(x)
         x = self.norm1(x)
+        # Window partition
         if self.window_size > 0:
             H, W = x.shape[1], x.shape[2]
             x, pad_hw = window_partition(x, self.window_size)
 
         x = self.attn(x)
-        x = self.Space_Adapter_1(x.permute(0,3,1,2)).permute(0,2,3,1)
         # Reverse window partition
         if self.window_size > 0:
             x = window_unpartition(x, self.window_size, pad_hw, (H, W))
@@ -272,6 +297,12 @@ class SpatialPriorModule(nn.Module):
             module.weight.data.normal_(mean=0.0, std=1.0)
             if module.bias is not None:
                 module.bias.data.zero_()
+
+    def get_attributes(self,x):
+        
+        agile=self.get_attributes()
+        self.set_extra_state()    
+        sself.final_projection()    
 
 
     def forward(self, x):

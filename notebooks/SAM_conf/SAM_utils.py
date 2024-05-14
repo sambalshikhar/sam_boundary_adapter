@@ -120,6 +120,9 @@ def get_network(args, net, use_gpu=True, gpu_device = 0, distribution = True):
     elif net == 'sam_adapter_multiscale':
         from segment_anything.build_sam_adapter_multiscale import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_convfuse':
+        from segment_anything.build_sam_adapter_convfuse import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
     elif net == 'sam_fineTuning':
         from segment_anything.build_sam_adapter import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)

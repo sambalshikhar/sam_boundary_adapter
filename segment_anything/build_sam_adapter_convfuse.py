@@ -4,13 +4,14 @@ from pathlib import Path
 import urllib.request
 import torch
 
-from segment_anything.modeling.image_encoder_multiscale import ImageEncoderViT
+from segment_anything.modeling.image_encoder_convfuse import ImageEncoderViT
 from segment_anything.modeling.mask_decoder import  MaskDecoder
 from segment_anything.modeling.prompt_encoder import  PromptEncoder
 from segment_anything.modeling.sam_adatper import Sam
 from segment_anything.modeling.transformer import TwoWayTransformer
 from segment_anything.modeling.custom_decoder import DecoderBlock
 from segment_anything.modeling.custom_decoder import upDecoder
+
 
 def build_sam_vit_h(args=None, checkpoint=None):
     return _build_sam(
@@ -143,6 +144,5 @@ def _build_sam(
         with open(checkpoint, "rb") as f:
             state_dict = torch.load(f)
         sam.load_state_dict(state_dict, strict=False)
-
-    sam.mask_decoder=upDecoder()
+    sam.mask_decoder = upDecoder()
     return sam

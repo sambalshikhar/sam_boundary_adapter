@@ -56,8 +56,8 @@ for n, value in net.named_parameters():
         else:
             value.requires_grad = False
 
-if args.dataset == 'ai4boudaries':
-    df=pd.read_csv("/home/geovisionaries/sambal/sam_boundary_adapter/ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
+if args.dataset == 'ai4boundaries':
+    df=pd.read_csv("./ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
     df_region=df[df['file_id'].str.contains("AT")]
     df_region_train=df_region[df_region['split']=='train']
     df_region_val=df_region[df_region['split']=='val']
@@ -74,8 +74,8 @@ if args.dataset == 'ai4boudaries':
     '''end'''
 if args.dataset=='ai4small':
 
-    train_image_list=glob("/home/geospatial/sambal/sam_boundary_adapter/original/sentinel-2-asia/train/images/*")
-    val_image_list=glob("/home/geospatial/sambal/sam_boundary_adapter/original/sentinel-2-asia/validate/images/*")
+    train_image_list=glob("./original/sentinel-2-asia/train/images/*")
+    val_image_list=glob("./original/sentinel-2-asia/validate/images/*")
 
     train_data=Ai4smallDataset(train_image_list)
     train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
@@ -113,11 +113,14 @@ total_iterations_per_epoch = len(train_dataloader)  # Adjust based on your requi
 T_max = total_iterations_per_epoch*10
 scheduler = CosineAnnealingLR(optimizer, T_max=T_max, eta_min=3e-5)
 
+#optimizer = optim.Adam(net.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
+#scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # learning rate decay
+
 for epoch in range(300):
     if args.mod == 'sam_adpt':
         net.train()
         time_start = time.time()
-        loss= function.train_sam(args, net, optimizer, train_dataloader, epoch,writer,vis=args.vis)
+        loss= function.train_sam(args, net, optimizer, train_dataloader, epoch,writer,scheduler,vis=args.vis)
         #current_lr=scheduler.get_last_lr()[0]
         logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
         time_end = time.time()

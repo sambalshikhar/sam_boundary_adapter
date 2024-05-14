@@ -137,14 +137,14 @@ class TestDataset():
         #image_path = os.path.join(self.image_path, image_name)
         input_image = self.__open_tiff__(image_path)
         input_image = self.min_max_normalize(input_image)
-        input_image = self.resize_array(input_image,(1024,1024))
+        input_image = self.resize_array(input_image,(512,512))
         #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
         input_image = torch.tensor(input_image).float()
 
         label_path = self.label_list[item]
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
-        input_label = self.resize_array(input_label,(256,256))
+        input_label = self.resize_array(input_label,(512,512))
         
         #label = label.resize((256, 256), Image.ANTIALIAS)
 
@@ -257,6 +257,7 @@ class Ai4smallDataset():
         in_points = torch.as_tensor(points_for_image)
         in_labels = torch.ones(in_points.shape[0], dtype=torch.int)
         points = (in_points, in_labels)
+    
 
         if self.dict_format:
             inout = 1
