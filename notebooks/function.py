@@ -301,7 +301,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                     else:
                       value.requires_grad = False
             
-            imge,conv1,conv2 = net.image_encoder(imgs)  # image embeddings
+            imge,conv1,conv2,conv3 = net.image_encoder(imgs)  # image embeddings
 
             if args.prompt_approach == 'box':
                 se, de = net.prompt_encoder(
@@ -327,11 +327,13 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                 multimask_output=False,
             )
             """
+            
 
             #print(imge.size())
             pred = net.mask_decoder(  # batched predicted masks
-                imge,conv1,conv2
+                imge,conv1,conv2,conv3
             )
+
             loss = lossfunc(pred, masks)  # pred -> mask  masks -> label
 
             pbar.set_postfix(**{'loss (batch)': loss.item()})
@@ -443,7 +445,7 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
 
                 '''test'''
                 with torch.no_grad():
-                    imge,conv_1,conv_2 = net.image_encoder(imgs)
+                    imge,conv_1,conv_2,conv_3 = net.image_encoder(imgs)
 
                     if args.prompt_approach == 'box':
                         se, de = net.prompt_encoder(
@@ -467,7 +469,7 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                         multimask_output=False,
                     )
                     """
-                    pred=net.mask_decoder(imge,conv_1,conv_2)
+                    pred=net.mask_decoder(imge,conv_1,conv_2,conv_3)
 
                     tot += lossfunc(pred, masks)
 

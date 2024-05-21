@@ -31,7 +31,7 @@ class ConvolutionalEncoder(nn.Module):
         x64 = self.relu(self.conv4(x128))
 
         # Return all feature maps
-        return x64,x128
+        return x64,x128,x256
 
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
 class ImageEncoderViT(nn.Module):
@@ -92,7 +92,7 @@ class ImageEncoderViT(nn.Module):
             )
         self.conv_block=ConvolutionalEncoder()
         self.blocks = nn.ModuleList()
-        #mlp_ratios=random_array = np.random.uniform(0.25, 0.7, size=depth)
+    #mlp_ratios=random_array = np.random.uniform(0.25, 0.7, size=depth)
         for i in range(depth):
             block = Block(
                 args= self.args,
@@ -130,14 +130,16 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        conv1,conv2=self.conv_block(x)
+        conv1,conv2,conv3=self.conv_block(x)
         x = self.patch_embed(x)
         if self.pos_embed is not None:
             x = x + self.pos_embed
-        for blk in self.blocks:
+
+        mid_feat=[]
+        for i,blk in enumerate(self.blocks):
             x = blk(x)
         x = self.neck(x.permute(0, 3, 1, 2))
-        return x,conv1,conv2
+        return x,conv1,conv2,conv3
 
 
 class Block(nn.Module):
