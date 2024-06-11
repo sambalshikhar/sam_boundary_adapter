@@ -216,6 +216,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
     epoch_loss = 0
     ind = 0
     # train mode
+    NUM_ACCUMULATION_STEPS=16
     net.train()
     optimizer.zero_grad()
 
@@ -230,7 +231,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
         lossfunc = DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
 
     with tqdm(total=len(train_loader), desc=f'Epoch {epoch}', unit='img') as pbar:
-        for pack in train_loader:
+        for i,pack in enumerate(train_loader):
             imgs = pack['image'].to(dtype=torch.float32, device=GPUdevice)
 
             masks = pack['label'].to(dtype=torch.float32, device=GPUdevice)
@@ -287,7 +288,6 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                 true_mask_ave = (true_mask_ave > 0.5).float()
                 # true_mask_ave = cons_tensor(true_mask_ave)
             imgs = imgs.to(dtype=torch.float32, device=GPUdevice)
-
             if args.fine_tuning_configuration: 
                 sam_no_freeze_block = [f"blocks.{idx}." for idx,i in enumerate(args.fine_tuning_configuration) if i == 1 ]
 
@@ -327,25 +327,31 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
                 multimask_output=False,
             )
             """
+        
             
 
             #print(imge.size())
+            
             pred = net.mask_decoder(  # batched predicted masks
                 imge,conv1,conv2,conv3
             )
+            
 
             loss = lossfunc(pred, masks)  # pred -> mask  masks -> label
+            epoch_loss += loss.item()
 
             pbar.set_postfix(**{'loss (batch)': loss.item()})
-            epoch_loss += loss.item()
+            #epoch_loss += loss.item()
             loss.backward()
 
             optimizer.step()
             optimizer.zero_grad()
+
             if schedulers:
                 schedulers.step()
 
             '''vis images'''
+            imgs=imgs[:,[2,1,0],:,:]
             if vis:
                 if ind % vis == 0:
                     namecat = 'Train'
@@ -367,7 +373,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
 
             pbar.update()
 
-    return loss
+    return epoch_loss/len(train_loader)
 
 
 def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
@@ -469,11 +475,13 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                         multimask_output=False,
                     )
                     """
+    
                     pred=net.mask_decoder(imge,conv_1,conv_2,conv_3)
 
                     tot += lossfunc(pred, masks)
 
                     '''vis images'''
+                    imgs=imgs[:,[2,1,0],:,:]
                     if ind % args.vis == 0:
                         namecat = 'Valid'
                         for na in name:

@@ -15,6 +15,30 @@ from typing import Optional, Tuple, Type
 from .common import LayerNorm2d, MLPBlock, Adapter
 
 
+class ConvolutionalEncoder(nn.Module):
+    def __init__(self):
+        super(ConvolutionalEncoder, self).__init__()
+        # Define the convolutional layers
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=2, padding=1)   # Output: (32, 512, 512)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1)  # Output: (64, 256, 256)
+        self.conv3 = nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1) # Output: (128, 128, 128)
+        self.conv4 = nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1) # Output: (256, 64, 64)
+        self.conv5 = nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1) # Output: (512, 32, 32)
+        self.conv6 = nn.Conv2d(512, 1024, kernel_size=3, stride=2, padding=1) # Output: (1024, 16, 16)
+
+        # Define the activation function
+        self.relu = nn.ReLU(inplace=True)
+
+    def forward(self, x):
+        # Apply convolutional layers with ReLU activation
+        x = self.relu(self.conv1(x))
+        x256 = self.relu(self.conv2(x))
+        x128 = self.relu(self.conv3(x256))
+        x64 = self.relu(self.conv4(x128))
+
+        # Return all feature maps
+        return x64,x128,x256
+
 # This class and its supporting functions below lightly adapted from the ViTDet backbone available at: https://github.com/facebookresearch/detectron2/blob/main/detectron2/modeling/backbone/vit.py # noqa
 class ImageEncoderViT(nn.Module):
     def __init__(
@@ -68,6 +92,7 @@ class ImageEncoderViT(nn.Module):
         )
 
         self.pos_embed: Optional[nn.Parameter] = None
+        self.conv_block=ConvolutionalEncoder()
         if use_abs_pos:
             # Initialize absolute positional embedding with pretrain image size.
             self.pos_embed = nn.Parameter(
@@ -110,8 +135,10 @@ class ImageEncoderViT(nn.Module):
         )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        conv1,conv2,conv3=self.conv_block(x)
         x = self.patch_embed(x)
         if self.pos_embed is not None:
+            # self.upscaled_pos_embed = upscale_pos_embed(self.pos_embed)
             x = x + self.pos_embed
 
         for blk in self.blocks:
@@ -119,8 +146,7 @@ class ImageEncoderViT(nn.Module):
 
         x = self.neck(x.permute(0, 3, 1, 2))
 
-        return x
-
+        return x,conv1,conv2,conv3
 
 class Block(nn.Module):
     """Transformer blocks with support of window attention and residual propagation blocks"""

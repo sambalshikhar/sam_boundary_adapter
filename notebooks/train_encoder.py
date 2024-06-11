@@ -16,6 +16,11 @@ args = SAM_cfg.parse_args()
 GPUdevice = torch.device('cuda', args.gpu_device)
 from torch.optim import SGD
 from torch.optim.lr_scheduler import CosineAnnealingLR
+import wandb
+
+# Initialize wandb at the start of your script
+wandb.login()
+wandb.init(project="Custom decoder",name=args.exp_name,config=args)
 
 net = get_network(args, args.net, use_gpu=args.gpu, gpu_device=GPUdevice, distribution=args.distributed)
 
@@ -44,18 +49,6 @@ args.path_helper = set_log_dir('../logs', args.exp_name)
 logger = create_logger(args.path_helper['log_path'])
 logger.info(args)
 
-if args.fine_tuning_configuration: 
-    sam_no_freeze_block = [f"blocks.{idx}." for idx,i in enumerate(args.fine_tuning_configuration) if i == 1 ]
-
-'''Train'''
-for n, value in net.named_parameters():
-    if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n):
-        if args.fine_tuning_configuration:
-            if 1 not in [1 for val in sam_no_freeze_block if val in n]: 
-                value.requires_grad = False
-        else:
-            value.requires_grad = False
-
 if args.dataset == 'ai4boundaries':
     df=pd.read_csv("./ai4boundaries_data/ai4boundaries_ftp_urls_all.csv")
     df_region=df[df['file_id'].str.contains("AT")]
@@ -74,8 +67,8 @@ if args.dataset == 'ai4boundaries':
     '''end'''
 if args.dataset=='ai4small':
 
-    train_image_list=glob("./original/sentinel-2-asia/train/images/*")
-    val_image_list=glob("./original/sentinel-2-asia/validate/images/*")
+    train_image_list=glob("../original/sentinel-2-asia/train/images/*")
+    val_image_list=glob("../original/sentinel-2-asia/validate/images/*")
 
     train_data=Ai4smallDataset(train_image_list)
     train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
@@ -104,17 +97,12 @@ best_tol = 1e6
 best_iou = 1e10
 best_dice = 1e10
 
-if args.fine_tuning_configuration: 
-    sam_no_freeze_block = [f"blocks.{idx}." for idx,i in enumerate(args.fine_tuning_configuration) if i == 1 ]
-
-#optimizer = torch.optim.AdamW(filter(lambda p: p.requires_grad, net.parameters()), lr=args.lr, betas=(0.9, 0.999), weight_decay=0.1)
-optimizer = optim.Adam(filter(lambda p: p.requires_grad, net.parameters()), lr=0.0001, betas=(0.9, 0.999),weight_decay=0.0)
+#optimizer = torch.optim.AdamW(net.parameters(),lr=0.0001, betas=(0.9, 0.999), weight_decay=0.1)
+optimizer = optim.Adam(net.parameters(), lr=0.0001, betas=(0.9, 0.999),weight_decay=0.0)
 total_iterations_per_epoch = len(train_dataloader)  # Adjust based on your requirements
 T_max = total_iterations_per_epoch*10
+#scheduler = torch.optim.lr_scheduler.CyclicLR(optimizer, base_lr=0.00001, max_lr=0.0001,step_size_up=T_max,cycle_momentum=False)
 scheduler = CosineAnnealingLR(optimizer, T_max=T_max, eta_min=3e-5)
-
-#optimizer = optim.Adam(net.parameters(), lr=1e-4, betas=(0.9, 0.999), eps=1e-08, weight_decay=0, amsgrad=False)
-#scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.5)  # learning rate decay
 
 for epoch in range(300):
     if args.mod == 'sam_adpt':
@@ -122,7 +110,8 @@ for epoch in range(300):
         time_start = time.time()
         loss= function.train_sam(args, net, optimizer, train_dataloader, epoch,writer,scheduler,vis=args.vis)
         #current_lr=scheduler.get_last_lr()[0]
-        logger.info(f'Train loss: {loss}|| @ epoch {epoch}.')
+        logger.info(f'Train loss: {loss}|| lr :{optimizer.param_groups[0]["lr"]}  @ epoch {epoch}.')
+
         time_end = time.time()
         
         print('time_for_training ', time_end - time_start)
@@ -131,6 +120,7 @@ for epoch in range(300):
         if True:
             tol, (eiou, edice) = function.validation_sam(args, val_dataloader, epoch, net,writer)
             logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {epoch}.')
+            wandb.log({"Epoch": epoch,"Train Loss": loss,"Learning Rate":optimizer.param_groups[0]["lr"],"Dice":edice})
 
             if args.distributed != 'none':
                 sd = net.module.state_dict()

@@ -9,6 +9,15 @@ import numpy as np
 from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_conv,Adapter_inception,BasicRFB
 
 
+class ReduceChannels(nn.Module):
+    def __init__(self, in_channels=4, out_channels=3):
+        super(ReduceChannels, self).__init__()
+        # 1x1 convolution to reduce channels
+        self.conv1x1 = nn.Conv2d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, x):
+        return self.conv1x1(x)
+    
 class ConvolutionalEncoder(nn.Module):
     def __init__(self):
         super(ConvolutionalEncoder, self).__init__()
@@ -138,6 +147,9 @@ class ImageEncoderViT(nn.Module):
         mid_feat=[]
         for i,blk in enumerate(self.blocks):
             x = blk(x)
+            if i in [2,5,8]:
+                mid_feat.append(x.permute(0,3,1,2))
+
         x = self.neck(x.permute(0, 3, 1, 2))
         return x,conv1,conv2,conv3
 
@@ -211,6 +223,7 @@ class Block(nn.Module):
         """    
         #self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
         self.Space_Adapter_1=Adapter_inception(dim)
+        self.Space_Adapter_2=Adapter_inception(dim)
         #self.Space_Adapter_2=Adapter(dim,skip_connect=True,mlp_ratio=mlp_ratio_adapter)
         # with skip connection
         # self.scale = scale
@@ -230,7 +243,7 @@ class Block(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         #x=self.Space_Adapter_1(x.permute(0,3,1,2)).permute(0,2,3,1)
         shortcut = x
-        x = self.Space_Adapter_1(x)
+        x = x+self.Space_Adapter_1(x)
         x = self.norm1(x)
         # Window partition
         if self.window_size > 0:
@@ -243,7 +256,8 @@ class Block(nn.Module):
             x = window_unpartition(x, self.window_size, pad_hw, (H, W))
 
         x = shortcut + x
-        x = x + self.mlp(self.norm2(x))
+        xn=self.norm2(x)
+        x = x + self.mlp(xn) + 0.5*self.Space_Adapter_2(xn)
         
         return x
         

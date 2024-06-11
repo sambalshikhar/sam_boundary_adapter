@@ -201,7 +201,7 @@ class Adapter_inception(nn.Module):
         self.conv5x5 = nn.Conv2d(int_dim,int_dim, kernel_size=(5, 5), padding=2)
         self.proj=nn.Linear(in_channels,in_channels)
         self.relu=nn.ReLU()
-        #self.apply(self._init_weights)
+        self.apply(self._init_weights)
         
     def forward(self, x):
         conv_low_pass=F.relu(self.conv_low_pass(x.permute(0,3,1,2)))
@@ -213,24 +213,17 @@ class Adapter_inception(nn.Module):
         # Concatenate along the last axis (axis=1 in PyTorch)
         concat_feature=torch.cat([out1x1, out3x3, out5x5], dim=1)
         concat_feature=concat_feature.permute(0,2,3,1)
-        out_feature=self.relu(self.proj(concat_feature))+x
+        out_feature=self.relu(self.proj(concat_feature))
         
         return out_feature
 
-    def _init_weights(self, m):
+    def _init_weights(self,m):
         if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, nn.LayerNorm):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
-        elif isinstance(m, nn.Conv2d):
-            fan_out = m.kernel_size[0] * m.kernel_size[1] * m.out_channels
-            fan_out //= m.groups
-            m.weight.data.normal_(0, math.sqrt(2.0 / fan_out))
-            if m.bias is not None:
-                m.bias.data.zero_()
+            torch.nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.01)
+        if isinstance(m, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.01)
 
     
 class Adapter_conv(nn.Module):
@@ -249,12 +242,13 @@ class Adapter_conv(nn.Module):
     
         self._init_weights()
 
-    def _init_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.normal_(m.weight, mean=0.0, std=0.02)
-                if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+    def init_weights(m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform(m.weight)
+            m.bias.data.fill_(0.01)
+        if isinstance(m, nn.Conv2d):
+            torch.nn.init.xavier_uniform(m.weight)
+            m.bias.data.fill_(0.01)
 
     def forward(self, x,conv_feature):
         # x is (BT, HW+1, D)

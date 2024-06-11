@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import math
 import warnings
 
+
 class upDecoder(nn.Module):
     def __init__(self):
         super(upDecoder, self).__init__()
@@ -58,6 +59,15 @@ class upDecoder(nn.Module):
             nn.Conv2d(64*2,64, kernel_size=1),
             nn.ReLU()
         )
+        self.apply(self._init_weights)
+        
+    def _init_weights(self,m):
+        if isinstance(m, nn.Linear):
+            torch.nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.01)
+        if isinstance(m, nn.Conv2d):
+            torch.nn.init.xavier_uniform_(m.weight)
+            m.bias.data.fill_(0.01)
         
     def forward(self, x,conv_1,conv_2,conv_3):
         x=F.normalize(torch.concat([x,conv_1],axis=1),1)
@@ -74,7 +84,6 @@ class upDecoder(nn.Module):
         return x
 
 def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
-    # type: (Tensor, float, float, float, float) -> Tensor
     r"""Fills the input Tensor with values drawn from a truncated
     normal distribution. The values are effectively drawn from the
     normal distribution :math:`\mathcal{N}(\text{mean}, \text{std}^2)`
@@ -92,6 +101,116 @@ def trunc_normal_(tensor, mean=0., std=1., a=-2., b=2.):
         >>> nn.init.trunc_normal_(w)
     """
     return _no_grad_trunc_normal_(tensor, mean, std, a, b)
+
+class SAGate(nn.Module):
+    def __init__(self, channel_dim):
+        super(SAGate, self).__init__()
+        self.mlp = nn.Sequential(
+            nn.Linear(channel_dim * 2, channel_dim * 2),
+            nn.ReLU(),
+            nn.Linear(channel_dim * 2, channel_dim * 2)
+        )
+        self.spatial_gate_conv = nn.Conv2d(channel_dim * 2, channel_dim * 2, kernel_size=1, stride=1, groups=2)
+
+    def forward(self, fc, ft):
+        # Ensure the features are in channel-first format for processin
+        
+        # Feature Separation Part
+        f_concat = torch.cat((fc, ft), dim=1) # Assuming the features are of the same spatial dimensions
+        i = F.adaptive_avg_pool2d(f_concat, (1, 1)).view(f_concat.size(0), -1) # Global descriptor
+        attention_vector = torch.sigmoid(self.mlp(i)).view(f_concat.size(0), -1, 1, 1)
+        w_c, w_t = attention_vector.chunk(2, dim=1)
+
+        filter_c = fc * w_c
+        filter_t = ft * w_t
+
+        rec_c = filter_c + fc
+        rec_t = filter_t + ft
+
+        # Feature Aggregation Part
+        f_concate = torch.cat((rec_c, rec_t), dim=1) # Concatenation at specific spatial positions
+        spatial_gates = self.spatial_gate_conv(f_concate)
+        
+        # We will now reshape to apply softmax on the correct axis
+        b, c, h, w = spatial_gates.size()
+        spatial_gates = spatial_gates.view(b, 2, c // 2, h, w)
+        ac, at = F.softmax(spatial_gates, dim=2).chunk(2, dim=1)
+        ac, at = ac.squeeze(1), at.squeeze(1)
+
+        # Weighted sum
+        m = rec_c * ac + rec_t * at
+        
+        return m
+"""    
+class upDecoder(nn.Module):
+    def __init__(self):
+        super(upDecoder, self).__init__()
+        # Define the decoder layers
+        self.up_1 = nn.Sequential(
+            nn.ConvTranspose2d(256, 256, kernel_size=2, stride=2),  # Output size: (N, 512, 128, 128)
+            nn.Conv2d(256,128, kernel_size=3, padding=1),           # Output size: (N, 512, 128, 128)
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+        
+        self.up_2=nn.Sequential(
+            nn.ConvTranspose2d(128,128, kernel_size=2, stride=2),  # Output size: (N, 256, 256, 256)
+            nn.Conv2d(128,64, kernel_size=3, padding=1),           # Output size: (N, 256, 256, 256)
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+        )
+
+        self.up_3=nn.Sequential(
+            nn.ConvTranspose2d(64,64, kernel_size=2, stride=2),  # Output size: (N, 256, 256, 256)
+            nn.Conv2d(64,32, kernel_size=3, padding=1),           # Output size: (N, 256, 256, 256)
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+        )
+        
+        self.conv_1=nn.Sequential(
+            nn.Conv2d(32,16, kernel_size=3, padding=1),
+            nn.BatchNorm2d(16),
+            nn.ReLU(),
+            nn.Conv2d(16,1, kernel_size=1) 
+        )
+        self.conv_2=nn.Sequential(
+            nn.Conv2d(16,8, kernel_size=3, padding=1),
+            nn.BatchNorm2d(8),
+            nn.ReLU(),
+            nn.Conv2d(8,1, kernel_size=1)                          # Output size: (N, 1, 1024, 1024)
+        )
+        self.merge_1=nn.Sequential(
+            nn.Conv2d(256,256, kernel_size=1),
+            nn.ReLU()
+        )
+        self.merge_2=nn.Sequential(
+            nn.Conv2d(128,128, kernel_size=1),
+            nn.ReLU()
+        )
+        self.merge_3=nn.Sequential(
+            nn.Conv2d(64,64, kernel_size=1),
+            nn.ReLU()
+        )
+        
+        self.sa_gate_1=SAGate(channel_dim=256)
+        self.sa_gate_2=SAGate(channel_dim=128)
+        self.sa_gate_3=SAGate(channel_dim=64)
+    def forward(self, x,conv_1,conv_2,conv_3):
+        x=self.sa_gate_1(x,conv_1)
+        #x=self.merge_1(x)
+        x=self.up_1(x)
+        #x=F.normalize(torch.concat([x,conv_2],axis=1),1)
+        x=self.sa_gate_2(x,conv_2)
+        #x=self.merge_2(x)
+        x=self.up_2(x)
+        #x=F.normalize(torch.concat([x,conv_3],axis=1),1)
+        x=self.sa_gate_3(x,conv_3)
+        #x=self.merge_3(x)
+        x=self.up_3(x)
+        x=self.conv_1(x)
+        #x=self.conv_2(x)
+        return x
+"""
 
 def _no_grad_trunc_normal_(tensor, mean, std, a, b):
     # Cut & paste from PyTorch official master until it's in a few official releases - RW

@@ -87,11 +87,11 @@ def evaluate(model,val_dataloader):
 
         for pack in tqdm(val_dataloader):
             
-            image = pack['image'].to(dtype=torch.float32, device=device)
+            image = pack['image'].to(device=device)
 
-            masks = pack['label'].to(dtype=torch.float32, device=device)
-            masks = masks[:,0,:,:]
-            masks = masks.unsqueeze(0)
+            masks = pack['label'].to(device=device)
+
+
 
             image = image.to(device=device)
             label = masks.to(device=device)
@@ -117,12 +117,10 @@ def train(model,train_dataloader):
     iou_list = []
     dice_list = []
     for pack in tqdm(train_dataloader):
-        image = pack['image'].to(dtype=torch.float32, device=device)
 
-        masks = pack['label'].to(dtype=torch.float32, device=device)
-        masks = masks[:,0,:,:]
-        masks = masks.unsqueeze(0)
-        
+        image = pack['image'].to(device=device)
+        masks = pack['label'].to(device=device)
+
         image = image.to(device=device)
         label = masks.to(device=device)
         
@@ -153,21 +151,21 @@ if __name__ == '__main__':
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
     model = smp.Unet(
-        encoder_name="efficientnet-b7",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
+        encoder_name="resnet101",        # choose encoder, e.g. mobilenet_v2 or efficientnet-b7
         encoder_weights="imagenet",     # use `imagenet` pre-trained weights for encoder initialization
         in_channels=3,                  # model input channels (1 for gray-scale images, 3 for RGB, etc.)
         classes=1,                      # model output channels (number of classes in your dataset)
     )
     model = model.to(device)
     
-    train_image_list=glob("./original/sentinel-2-asia/train/images/*")
-    val_image_list=glob("./original/sentinel-2-asia/validate/images/*")
+    train_image_list=glob("../original/sentinel-2-asia/train/images/*")
+    val_image_list=glob("../original/sentinel-2-asia/validate/images/*")
 
     train_data=Ai4smallDataset(train_image_list)
-    train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
+    train_dataloader = DataLoader(dataset=train_data, batch_size=4, shuffle=True)
 
     val_data=Ai4smallDataset(val_image_list)
-    val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=False)
+    val_dataloader = DataLoader(dataset=val_data, batch_size=2, shuffle=False)
 
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -177,8 +175,8 @@ if __name__ == '__main__':
     logger = logging.getLogger('unet')
     lossfunc = DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
     threshold = (0.1, 0.3, 0.5, 0.7, 0.9)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    epochs=100
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.0001)
+    epochs=200
     for epoch in range(epochs):
         epoch_start_time = time.time()
         train(model,train_dataloader)

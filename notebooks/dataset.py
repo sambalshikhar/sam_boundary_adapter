@@ -40,7 +40,7 @@ class TrainDataset():
         label_path = self.label_list[item]
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
-        input_label = self.resize_array(input_label,(256,256))
+        input_label = self.resize_array(input_label,(512,512))
         
         #label = label.resize((256, 256), Image.ANTIALIAS)
 
@@ -228,7 +228,7 @@ class Ai4smallDataset():
 
         self.image_list = image_list
         self.image_ids = [x.split("/")[-1].split(".")[0] for x in self.image_list]
-        self.mask_list= [f"./original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
+        self.mask_list= [f"../original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
         self.dict_format=dict_format
 
     def __getitem__(self, item):
@@ -237,14 +237,14 @@ class Ai4smallDataset():
         #image_path = os.path.join(self.image_path, image_name)
         input_image = self.__open_tiff__(image_path)
         input_image = self.min_max_normalize(input_image)
-        input_image = self.resize_array(input_image,(512,512))
+        input_image = self.resize_array(input_image,(1024,1024))
         #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
         input_image = torch.tensor(input_image).float()
 
         label_path = self.mask_list[item]
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
-        input_label = self.resize_array(input_label,(512,512),mask=True)
+        input_label = self.resize_array(input_label,(256,256),mask=True)
         input_label = torch.tensor(input_label)
 
         points_scale = np.array(input_image.shape[1:])[None, ::-1]
