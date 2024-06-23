@@ -22,6 +22,8 @@ import wandb
 wandb.login()
 wandb.init(project="Custom decoder",name=args.exp_name,config=args)
 
+torch.manual_seed(1337)
+
 net = get_network(args, args.net, use_gpu=args.gpu, gpu_device=GPUdevice, distribution=args.distributed)
 
 if args.pretrain:
@@ -69,12 +71,16 @@ if args.dataset=='ai4small':
 
     train_image_list=glob("../original/sentinel-2-asia/train/images/*")
     val_image_list=glob("../original/sentinel-2-asia/validate/images/*")
+    test_image_list=glob("../original/sentinel-2-asia/test/images/*")
 
     train_data=Ai4smallDataset(train_image_list)
     train_dataloader = DataLoader(dataset=train_data, batch_size=1, shuffle=True)
 
-    val_data=Ai4smallDataset(val_image_list)
+    val_data=Ai4smallDataset(val_image_list,split='validate')
     val_dataloader = DataLoader(dataset=val_data, batch_size=1, shuffle=False)
+
+    test_data=Ai4smallDataset(test_image_list,split='test')
+    test_dataloader = DataLoader(dataset=test_data, batch_size=1, shuffle=False)
 
     
 '''checkpoint path and tensorboard'''
@@ -96,6 +102,7 @@ best_acc = 0.0
 best_tol = 1e6
 best_iou = 1e10
 best_dice = 1e10
+best_f1 =0.0
 
 #optimizer = torch.optim.AdamW(net.parameters(),lr=0.0001, betas=(0.9, 0.999), weight_decay=0.1)
 optimizer = optim.Adam(net.parameters(), lr=0.0001, betas=(0.9, 0.999),weight_decay=0.0)
@@ -118,19 +125,20 @@ for epoch in range(300):
         net.eval()
         
         if True:
-            tol, (eiou, edice) = function.validation_sam(args, val_dataloader, epoch, net,writer)
+            tol, (eiou, edice),pr_mean,re_mean,f1_mean = function.validation_sam(args, val_dataloader, epoch, net,writer)
+            test_tol, (test_eiou,test_edice),test_pr_mean,test_re_mean,test_f1_mean = function.validation_sam(args, test_dataloader, epoch, net,writer)
             logger.info(f'Total score: {tol}, IOU: {eiou}, DICE: {edice} || @ epoch {epoch}.')
-            wandb.log({"Epoch": epoch,"Train Loss": loss,"Learning Rate":optimizer.param_groups[0]["lr"],"Dice":edice})
+            logger.info(f'val_f1_mean: {f1_mean},val_pr_mean: {pr_mean},val_re_mean: {re_mean}')
+            logger.info(f'test_f1_mean: {test_f1_mean},test_pr_mean: {test_pr_mean},test_re_mean: {test_re_mean}')
+            wandb.log({"Epoch": epoch,"Train Loss": loss,"Learning Rate":optimizer.param_groups[0]["lr"],"Dice":edice,"f1":f1_mean,"precision":pr_mean,"recall":re_mean,"f1_test":test_f1_mean,"precision_test":test_pr_mean,"recall":test_re_mean})
 
             if args.distributed != 'none':
                 sd = net.module.state_dict()
             else:
                 sd = net.state_dict()
 
-            if tol < best_tol or eiou > best_iou or edice > best_dice:
-                best_iou = eiou
-                best_dice = edice
-                best_tol = tol
+            if test_f1_mean>best_f1:
+                best_f1=test_f1_mean
                 is_best = True
 
                 save_checkpoint({

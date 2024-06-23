@@ -234,9 +234,9 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
         for i,pack in enumerate(train_loader):
             imgs = pack['image'].to(dtype=torch.float32, device=GPUdevice)
 
-            masks = pack['label'].to(dtype=torch.float32, device=GPUdevice)
-            masks = masks[:,0,:,:]
-            masks = masks.unsqueeze(0)
+            masks = pack['label'].to(device=GPUdevice)
+            #masks = masks[:,:,:,:]
+            #masks = masks.unsqueeze(0)
             # for k,v in pack['image_meta_dict'].items():
             #     print(k)
             # del pack['pt']
@@ -294,7 +294,7 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
             
             '''Train'''
             for n, value in net.named_parameters():
-                if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n) and ("sa_gate" not in n) and ("cnn_embed" not in n) and ("norm3" not in n)  and ("conv_block" not in n):
+                if ("_Adapter" not in n) and ("decoder" not in n) and ("attn.qkv" not in n) and ("sa_gate" not in n) and ("cnn_embed" not in n) and ("norm3" not in n)  and ("conv_block" not in n) and ("conv1x1" not in n) and ("w_a" not in n) and ("w_b" not in n) and ("qkv" not in n)  and ("prefix_adapter" not in n):
                     if args.fine_tuning_configuration:
                         if 1 not in [1 for val in sam_no_freeze_block if val in n]: 
                             value.requires_grad = False
@@ -331,7 +331,6 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
             
 
             #print(imge.size())
-            
             pred = net.mask_decoder(  # batched predicted masks
                 imge,conv1,conv2,conv3
             )
@@ -375,6 +374,41 @@ def train_sam(args, net: nn.Module, optimizer, train_loader,
 
     return epoch_loss/len(train_loader)
 
+def compute_metrics(preds, labels, threshold=0.5):
+    """
+    Compute the precision, recall, and F1 score for predicted masks.
+    
+    Args:
+    preds (torch.Tensor): Predicted masks with shape (batch_size, 1, H, W).
+    labels (torch.Tensor): Ground truth masks with shape (batch_size, 1, H, W).
+    threshold (float): Threshold to convert probabilities to binary masks.
+    
+    Returns:
+    dict: Dictionary containing average precision, recall, and F1 score.
+    """
+    # Threshold the predictions
+    preds=torch.sigmoid(preds)
+    preds = preds > threshold
+    
+    # Flatten the tensors to simplify calculation
+    preds = preds.view(preds.shape[0], -1).float()
+    labels = labels.view(labels.shape[0], -1).float()
+    
+    # True positives, false positives, and false negatives
+    TP = (preds * labels).sum(dim=1)
+    FP = (preds * (1 - labels)).sum(dim=1)
+    FN = ((1 - preds) * labels).sum(dim=1)
+    
+    # Precision, recall, and F1 for each element in the batch
+    precision = TP / (TP + FP + 1e-8)
+    recall = TP / (TP + FN + 1e-8)
+    f1 = 2 * (precision * recall) / (precision + recall + 1e-8)
+    
+    # Average across the batch
+    avg_precision = precision.mean().item()
+    avg_recall = recall.mean().item()
+    avg_f1 = f1.mean().item()
+    return avg_precision,avg_recall,avg_f1
 
 def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
     # eval mode
@@ -389,6 +423,9 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
     threshold = (0.1, 0.3, 0.5, 0.7, 0.9)
     GPUdevice = torch.device('cuda:' + str(args.gpu_device))
     device = GPUdevice
+    f1_list=[]
+    rec_list=[]
+    pr_list=[]
 
     if args.thd:
         lossfunc = DiceCELoss(sigmoid=True, squared_pred=True, reduction='mean')
@@ -399,9 +436,9 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
     with tqdm(total=n_val, desc='Validation round', unit='batch', leave=False) as pbar:
         for ind, pack in enumerate(val_loader):
             imgsw = pack['image'].to(dtype=torch.float32, device=GPUdevice)
-            masksw = pack['label'].to(dtype=torch.float32, device=GPUdevice)
-            masksw = masksw[:,0,:,:]
-            masksw = masksw.unsqueeze(0)
+            masksw = pack['label'].to(device=GPUdevice)
+            #masksw = masksw[:,:,:,:]
+            #masksw = masksw.unsqueeze(0)
 
             name = pack['image_meta_dict']['filename_or_obj']
 
@@ -475,11 +512,11 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                         multimask_output=False,
                     )
                     """
-    
+                    
+
                     pred=net.mask_decoder(imge,conv_1,conv_2,conv_3)
 
                     tot += lossfunc(pred, masks)
-
                     '''vis images'''
                     imgs=imgs[:,[2,1,0],:,:]
                     if ind % args.vis == 0:
@@ -502,17 +539,26 @@ def validation_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):
                                       reverse=False, box=pack['box'])
 
                     mask_old = masks
-
                     temp = eval_seg(pred, mask_old, threshold)
-                    print(temp)
+                    pre,rec,f1=compute_metrics(pred, mask_old)
+
+                    pr_list.append(pre)
+                    rec_list.append(rec)
+                    f1_list.append(f1)
+
                     mix_res = tuple([sum(a) for a in zip(mix_res, temp)])
 
             pbar.update()
 
     if args.evl_chunk:
         n_val = n_val * (imgsw.size(-1) // evl_ch)
+    
+    
+    pr_mean = np.average(pr_list)
+    re_mean = np.average(rec_list)
+    f1_mean = np.average(f1_list)
 
-    return tot / n_val, tuple([a / n_val for a in mix_res])
+    return tot / n_val, tuple([a / n_val for a in mix_res]),pr_mean,re_mean,f1_mean
 
 
 def Test_sam(args, val_loader, epoch, net: nn.Module, clean_dir=True):

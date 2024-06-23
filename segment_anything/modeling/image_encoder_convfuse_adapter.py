@@ -16,58 +16,6 @@ from .common import LayerNorm2d, MLPBlock, Adapter
 
 
 
-class _LoRA_qkv(nn.Module):
-    """In Sam it is implemented as
-    self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-    B, N, C = x.shape
-    qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, self.head_dim).permute(2, 0, 3, 1, 4)
-    q, k, v = qkv.unbind(0)
-    """
-
-    def __init__(
-            self,
-            qkv: nn.Module,
-            linear_a_q: nn.Module,
-            linear_b_q: nn.Module,
-            linear_a_v: nn.Module,
-            linear_b_v: nn.Module,
-    ):
-        super().__init__()
-        self.qkv = qkv
-        self.linear_a_q = linear_a_q
-        self.linear_b_q = linear_b_q
-        self.linear_a_v = linear_a_v
-        self.linear_b_v = linear_b_v
-        self.dim = qkv.in_features
-        self.w_identity = torch.eye(qkv.in_features)
-
-    def forward(self, x):
-        qkv = self.qkv(x)  # B,N,N,3*org_C
-        new_q = self.linear_b_q(self.linear_a_q(x))
-        new_v = self.linear_b_v(self.linear_a_v(x))
-        qkv[:, :, :, : self.dim] += new_q
-        qkv[:, :, :, -self.dim:] += new_v
-        return qkv
-
-
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from einops import rearrange
-import math
-
-from typing import Optional, Tuple, Type
-
-from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_inception,BasicRFB
-
-
-
 # def upscale_pos_embed(pos_embed):
 #     # pos_embed: (1, 64, 64, 768)
 #     # scale_factor: 缩放因子，此处为2
@@ -211,11 +159,12 @@ class ImageEncoderViT(nn.Module):
             x = x + self.pos_embed
 
         for blk in self.blocks:
-            x = blk(x)
+            x = blk(x,conv1.permute(0,2,3,1))
 
         x = self.neck(x.permute(0, 3, 1, 2))
 
         return x,conv1,conv2,conv3
+
 
 class Block(nn.Module):
     """Transformer blocks with support of window attention and residual propagation blocks"""
@@ -251,7 +200,6 @@ class Block(nn.Module):
                 positional parameter size.
         """
         super().__init__()
-        self.r = 4
         self.args = args
         self.norm1 = norm_layer(dim)
         self.attn = Attention(
@@ -262,56 +210,59 @@ class Block(nn.Module):
             rel_pos_zero_init=rel_pos_zero_init,
             input_size=input_size if window_size == 0 else (window_size, window_size),
         )
-        self.w_As = []  # These are linear layers
-        self.w_Bs = []
-        w_qkv_linear = self.attn.qkv
-        self.w_a_linear_q = nn.Linear(dim, self.r, bias=False)
-        self.w_b_linear_q = nn.Linear(self.r, dim, bias=False)
-        self.w_a_linear_v = nn.Linear(dim, self.r, bias=False)
-        self.w_b_linear_v = nn.Linear(self.r, dim, bias=False)
-        self.attn.qkv = _LoRA_qkv(
-            w_qkv_linear,
-            self.w_a_linear_q,
-            self.w_b_linear_q,
-            self.w_a_linear_v,
-            self.w_b_linear_v,
-            )
+        self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
+        self.Space_Adapter = Adapter(dim)  # with skip connection
+        self.scale = scale
+        self.Depth_Adapter = Adapter(dim, skip_connect=False)  # no skip connection
+
         self.norm2 = norm_layer(dim)
         self.mlp = MLPBlock(embedding_dim=dim, mlp_dim=int(dim * mlp_ratio), act=act_layer)
 
         self.window_size = window_size
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.window_size == 0:
+            self.cross_Adapter= qkvAttention(dim=dim, num_heads=num_heads)
+            self.conv1x1 = nn.Conv2d(256,dim, kernel_size=(1, 1))
+
+
+    def forward(self, x: torch.Tensor,conv) -> torch.Tensor:
         shortcut = x
         # Window partition
         if self.window_size > 0:
             H, W = x.shape[1], x.shape[2]
             x, pad_hw = window_partition(x, self.window_size)
 
-        # ## 3d branch
-        # if self.args.thd: 
-        #     hh, ww = x.shape[1], x.shape[2]
-        #     depth = self.args.chunk
-        #     xd = rearrange(x, '(b d) h w c -> (b h w) d c ', d=depth)
-        #     # xd = rearrange(xd, '(b d) n c -> (b n) d c', d=self.in_chans)
-        #     xd = self.norm1(xd)
-        #     dh, _ = closest_numbers(depth)
-        #     xd = rearrange(xd, 'bhw (dh dw) c -> bhw dh dw c', dh= dh)
-        #     xd = self.Depth_Adapter(self.attn(xd))
-        #     xd = rearrange(xd, '(b n) dh dw c ->(b dh dw) n c', n= hh * ww )
+        ## 3d branch
+        if self.args.thd: 
+            hh, ww = x.shape[1], x.shape[2]
+            depth = self.args.chunk
+            xd = rearrange(x, '(b d) h w c -> (b h w) d c ', d=depth)
+            # xd = rearrange(xd, '(b d) n c -> (b n) d c', d=self.in_chans)
+            xd = self.norm1(xd)
+            dh, _ = closest_numbers(depth)
+            xd = rearrange(xd, 'bhw (dh dw) c -> bhw dh dw c', dh= dh)
+            xd = self.Depth_Adapter(self.attn(xd))
+            xd = rearrange(xd, '(b n) dh dw c ->(b dh dw) n c', n= hh * ww )
 
         x = self.norm1(x)
         x = self.attn(x)
+        x = self.Space_Adapter(x)
 
-        # if self.args.thd:
-        #     xd = rearrange(xd, 'b (hh ww) c -> b  hh ww c', hh= hh )
-        #     x = x + xd
+        if self.window_size == 0:
+            conv=self.conv1x1(conv.permute(0,3,1,2)).permute(0,2,3,1)
+            sax = self.cross_Adapter(conv,x,x) # b h w c
+            x = x + sax
+
+        if self.args.thd:
+            xd = rearrange(xd, 'b (hh ww) c -> b  hh ww c', hh= hh )
+            x = x + xd
         # Reverse window partition
         if self.window_size > 0:
             x = window_unpartition(x, self.window_size, pad_hw, (H, W))
 
         x = shortcut + x
-        x = x + self.mlp(self.norm2(x))
+        xn = self.norm2(x)
+        x = x + self.mlp(xn) + self.scale * self.MLP_Adapter(xn)
         return x
 
 
@@ -536,4 +487,63 @@ class PatchEmbed(nn.Module):
         x = self.proj(x)
         # B C H W -> B H W C
         x = x.permute(0, 2, 3, 1)
+        return x
+
+
+class qkvAttention(nn.Module):
+    """Multi-head Attention block with relative position embeddings."""
+
+    def __init__(
+        self,
+        dim: int,
+        num_heads: int = 8,
+        qkv_bias: bool = True,
+        use_rel_pos: bool = False,
+        rel_pos_zero_init: bool = True,
+        input_size: Optional[Tuple[int, int]] = None,
+    ) -> None:
+        """
+        Args:
+            dim (int): Number of input channels.
+            num_heads (int): Number of attention heads.
+            qkv_bias (bool):  If True, add a learnable bias to query, key, value.
+            rel_pos (bool): If True, add relative positional embeddings to the attention map.
+            rel_pos_zero_init (bool): If True, zero initialize relative positional parameters.
+            input_size (tuple(int, int) or None): Input resolution for calculating the relative
+                positional parameter size.
+        """
+        super().__init__()
+        self.num_heads = num_heads
+        head_dim = dim // num_heads
+        self.scale = head_dim**-0.5
+
+        self.q= nn.Linear(dim, dim, bias=qkv_bias)
+        self.k= nn.Linear(dim, dim, bias=qkv_bias)
+        self.v= nn.Linear(dim, dim, bias=qkv_bias)
+        self.proj = nn.Linear(dim, dim)
+
+        self.use_rel_pos = use_rel_pos
+        if self.use_rel_pos:
+            assert (
+                input_size is not None
+            ), "Input size must be provided if using relative positional encoding."
+            # initialize relative positional embeddings
+            self.rel_pos_h = nn.Parameter(torch.zeros(2 * input_size[0] - 1, head_dim))
+            self.rel_pos_w = nn.Parameter(torch.zeros(2 * input_size[1] - 1, head_dim))
+
+    def forward(self, q: torch.Tensor, k: torch.Tensor, v:torch.Tensor) -> torch.Tensor:
+        B, H, W, _ = q.shape
+        q = self.q(q).reshape(B, H * W, self.num_heads, -1).permute(0, 2, 1, 3).reshape(B*self.num_heads, H*W, -1)
+        k = self.k(k).reshape(B, H * W, self.num_heads, -1).permute(0, 2, 1, 3).reshape(B*self.num_heads, H*W, -1)
+        v = self.v(v).reshape(B, H * W, self.num_heads, -1).permute(0, 2, 1, 3).reshape(B*self.num_heads, H*W, -1)
+
+        attn = (q * self.scale) @ k.transpose(-2, -1)
+
+        if self.use_rel_pos:
+            attn = add_decomposed_rel_pos(attn, q, self.rel_pos_h, self.rel_pos_w, (H, W), (H, W))
+
+        attn = attn.softmax(dim=-1)
+        x = (attn @ v).view(B, self.num_heads, H, W, -1).permute(0, 2, 3, 1, 4).reshape(B, H, W, -1)
+        x = self.proj(x)
+
         return x

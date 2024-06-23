@@ -4,14 +4,13 @@ from pathlib import Path
 import urllib.request
 import torch
 
-from segment_anything.modeling.image_encoder_lora import ImageEncoderViT
+from segment_anything.modeling.image_encoder_convfuse_adapter import ImageEncoderViT
 from segment_anything.modeling.mask_decoder import  MaskDecoder
 from segment_anything.modeling.prompt_encoder import  PromptEncoder
 from segment_anything.modeling.sam_adatper import Sam
 from segment_anything.modeling.transformer import TwoWayTransformer
-from segment_anything.modeling.custom_decoder import upDecoder
 from segment_anything.modeling.custom_decoder import DecoderBlock
-
+from segment_anything.modeling.custom_decoder import upDecoder
 
 def build_sam_vit_h(args=None, checkpoint=None):
     return _build_sam(

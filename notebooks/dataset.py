@@ -13,6 +13,7 @@ import pandas as pd
 from skimage.transform import rotate
 import random
 import rasterio
+
 class TrainDataset():
     def __init__(self, image_id, label_id, is_robustness,dict_format=True):
 
@@ -33,7 +34,7 @@ class TrainDataset():
         #image_path = os.path.join(self.image_path, image_name)
         input_image = self.__open_tiff__(image_path)
         input_image = self.min_max_normalize(input_image)
-        input_image = self.resize_array(input_image,(1024,1024))
+        input_image = self.resize_array(input_image,(512,512))
         #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
         input_image = torch.tensor(input_image).float()
 
@@ -41,10 +42,11 @@ class TrainDataset():
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
         input_label = self.resize_array(input_label,(512,512))
+        input_label=input_label[0,:,:]*(1-input_label[1,:,:])
         
         #label = label.resize((256, 256), Image.ANTIALIAS)
 
-        input_label = torch.tensor(input_label).long()
+        input_label = torch.tensor(input_label)
 
         points_scale = np.array(input_image.shape[1:])[None, ::-1]
         point_grids = build_all_layer_point_grids(
@@ -71,7 +73,7 @@ class TrainDataset():
             name = image_path.split('/')[-1].split(".tif")[0]
             image_meta_dict = {'filename_or_obj': name}
             return {
-                'image': input_image,
+                'image': input_image[[2,1,0],:,:],
                 'label': input_label,
                 'p_label': point_label,
                 'pt': pt,
@@ -107,7 +109,7 @@ class TrainDataset():
         pil_image = Image.fromarray(array.astype(np.uint8))
 
         # Resize the image
-        resized_image = pil_image.resize(new_size)
+        resized_image = pil_image.resize(new_size,Image.Resampling.NEAREST)
 
         # Convert back to numpy array
         resized_array = np.array(resized_image)
@@ -145,10 +147,11 @@ class TestDataset():
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
         input_label = self.resize_array(input_label,(512,512))
+        input_label=input_label[0,:,:]*(1-input_label[1,:,:])
         
         #label = label.resize((256, 256), Image.ANTIALIAS)
 
-        input_label = torch.tensor(input_label).long()
+        input_label = torch.tensor(input_label)
 
         points_scale = np.array(input_image.shape[1:])[None, ::-1]
         point_grids = build_all_layer_point_grids(
@@ -175,7 +178,7 @@ class TestDataset():
             name = image_path.split('/')[-1].split(".tif")[0]
             image_meta_dict = {'filename_or_obj': name}
             return {
-                'image': input_image,
+                'image': input_image[[2,1,0],:,:],
                 'label': input_label,
                 'p_label': point_label,
                 'pt': pt,
@@ -211,7 +214,7 @@ class TestDataset():
         pil_image = Image.fromarray(array.astype(np.uint8))
 
         # Resize the image
-        resized_image = pil_image.resize(new_size)
+        resized_image = pil_image.resize(new_size,Image.Resampling.NEAREST)
 
         # Convert back to numpy array
         resized_array = np.array(resized_image)
@@ -223,12 +226,14 @@ class TestDataset():
 
         return resized_array
 
+
 class Ai4smallDataset():
-    def __init__(self,image_list,dict_format=True):
+    def __init__(self,image_list,split='train',dict_format=True):
 
         self.image_list = image_list
         self.image_ids = [x.split("/")[-1].split(".")[0] for x in self.image_list]
-        self.mask_list= [f"../original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
+        #self.mask_list= [f"../original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
+        self.mask_list= [f"../original/sentinel-2-asia/{split}/masks/{x}.tif" for x in self.image_ids]
         self.dict_format=dict_format
 
     def __getitem__(self, item):
@@ -244,7 +249,8 @@ class Ai4smallDataset():
         label_path = self.mask_list[item]
         #label_path = os.path.join(self.label_path, label_name)
         input_label = self.__open_tiff__(label_path)
-        input_label = self.resize_array(input_label,(256,256),mask=True)
+        input_label=np.where(input_label>0,1,0)
+        input_label = self.resize_array(input_label,(512,512),mask=True)
         input_label = torch.tensor(input_label)
 
         points_scale = np.array(input_image.shape[1:])[None, ::-1]
@@ -324,6 +330,7 @@ class Ai4smallDataset():
         resized_array = resized_array/255
 
         return resized_array
+
 
 
 def build_all_layer_point_grids(

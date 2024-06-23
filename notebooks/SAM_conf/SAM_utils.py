@@ -123,6 +123,9 @@ def get_network(args, net, use_gpu=True, gpu_device = 0, distribution = True):
     elif net == 'sam_adapter_convfuse':
         from segment_anything.build_sam_adapter_convfuse import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
+    elif net == 'sam_adapter_convfuse_adapter':
+        from segment_anything.build_sam_adapter_convfuse_adapter import sam_model_registry
+        net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
     elif net == 'sam_fineTuning':
         from segment_anything.build_sam_adapter import sam_model_registry
         net = sam_model_registry['vit_b'](args,checkpoint=args.sam_ckpt).to(device)
@@ -1198,12 +1201,14 @@ def eval_seg(pred,true_mask_p,threshold):
     masks: [b,2,h,w]
     pred: [b,2,h,w]
     '''
+    
     b, c, h, w = pred.size()
     if c == 2:
         iou_d, iou_c, disc_dice, cup_dice = 0,0,0,0
         for th in threshold:
 
             gt_vmask_p = (true_mask_p > th).float()
+            pred=torch.sigmoid(pred)
             vpred = (pred > th).float()
             vpred_cpu = vpred.cpu()
             disc_pred = vpred_cpu[:,0,:,:].numpy().astype('int32')

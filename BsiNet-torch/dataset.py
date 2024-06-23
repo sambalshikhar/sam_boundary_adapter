@@ -26,8 +26,8 @@ class Ai4smallDataset():
 
         self.image_list = image_list
         self.image_ids = [x.split("/")[-1].split(".")[0] for x in self.image_list]
-        self.parcel_list= [f"../original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
-        self.mask_list= [f"../original/sentinel-2-asia/{flag}/masks/{x}.tif" for x in self.image_ids]
+        self.parcel_list= [f"/home/geovisionaries/sambal/original/sentinel-2-asia/parcel_mask/{x}.tif" for x in self.image_ids]
+        self.mask_list= [f"/home/geovisionaries/sambal/original/sentinel-2-asia/{flag}/masks/{x}.tif" for x in self.image_ids]
         self.dict_format=dict_format
 
     def __getitem__(self, item):
@@ -35,7 +35,7 @@ class Ai4smallDataset():
         image_path = self.image_list[item]
         #image_path = os.path.join(self.image_path, image_name)
         input_image = self.__open_tiff__(image_path)
-        input_image = input_image[:3,:,:]
+        input_image = input_image[[2,1,0],:,:]
         input_image = self.min_max_normalize(input_image)
         input_image = self.resize_array(input_image,(512,512))
         #input_image = image.resize((1024, 1024), Image.ANTIALIAS)
@@ -49,6 +49,7 @@ class Ai4smallDataset():
         mask_path = self.mask_list[item]
         #label_path = os.path.join(self.parcel_path, label_name)
         mask_label = self.__open_tiff__(mask_path)
+        mask_label = np.where(mask_label>0,1,0)
         mask_label = self.resize_array(mask_label,(512,512),mask=True)
         mask_label = torch.tensor(mask_label)
         return input_image,mask_label,parcel_label
@@ -80,7 +81,7 @@ class Ai4smallDataset():
         pil_image = Image.fromarray(array.astype(np.uint8))
 
         # Resize the image
-        resized_image = pil_image.resize(new_size)
+        resized_image = pil_image.resize(new_size,Image.Resampling.NEAREST)
 
         # Convert back to numpy array
         resized_array = np.array(resized_image)

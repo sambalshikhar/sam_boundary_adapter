@@ -12,7 +12,7 @@ import math
 
 from typing import Optional, Tuple, Type
 
-from .common import LayerNorm2d, MLPBlock, Adapter
+from .common import LayerNorm2d, MLPBlock, Adapter,Adapter_inception,BasicRFB
 
 
 
@@ -30,8 +30,6 @@ from .common import LayerNorm2d, MLPBlock, Adapter
 #     pos_embed = pos_embed.permute(0, 2, 3, 1)
 
 #     return pos_embed
-
-    
 class ConvolutionalEncoder(nn.Module):
     def __init__(self):
         super(ConvolutionalEncoder, self).__init__()
@@ -210,7 +208,7 @@ class Block(nn.Module):
             rel_pos_zero_init=rel_pos_zero_init,
             input_size=input_size if window_size == 0 else (window_size, window_size),
         )
-        self.MLP_Adapter = Adapter(dim, skip_connect=False)  # MLP-adapter, no skip connection
+        self.MLP_Adapter = Adapter(dim)  # MLP-adapter, no skip connection
         self.Space_Adapter = Adapter(dim)  # with skip connection
         self.scale = scale
         self.Depth_Adapter = Adapter(dim, skip_connect=False)  # no skip connection

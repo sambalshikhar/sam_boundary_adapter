@@ -51,8 +51,6 @@ def eval_seg(pred, true_mask_p, threshold):
         disc_pred = vpred_cpu[:, 0, :, :].numpy().astype('int32')
 
         disc_mask = gt_vmask_p[:, 0, :, :].squeeze(1).cpu().numpy().astype('int32')
-
-        '''iou for numpy'''
         eiou += cal_iou(disc_pred, disc_mask)
 
         '''dice for torch'''
@@ -74,8 +72,9 @@ def evaluate(device, epoch, model, data_loader, writer):
             inputs,mask,parcel= data
             inputs = inputs.to(device)
             parcel = parcel.to(device)
+            mask= mask.to(device)
             pred_mask,pred_parcel = model(inputs)
-            iou,dice=eval_seg(pred_parcel,parcel,threshold)
+            iou,dice=eval_seg(pred_mask,mask,threshold)
             iou_list.append(iou)
             dice_list.append(dice)
         iou_mean = np.average(iou_list)
